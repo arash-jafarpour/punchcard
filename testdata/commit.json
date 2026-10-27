@@ -1,0 +1,16 @@
+{
+  "id": "c20e74377000c7f5e49af014efa0612c394735ff",
+  "short_id": "c20e7437",
+  "title": "feat(admin): use a full-width table with a profile sheet",
+  "message": "feat(admin): use a full-width table with a profile sheet\n\nReplace the card grid with a table and a profile sheet.",
+  "author_name": "Arash Jafarpour",
+  "author_email": "arash@daal.ir",
+  "created_at": "2026-10-27T15:50:00+03:30",
+  "authored_date": "2026-10-27T15:45:00+03:30",
+  "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/commit/c20e74377000c7f5e49af014efa0612c394735ff",
+  "stats": {
+    "additions": 69,
+    "deletions": 40,
+    "total": 109
+  }
+}

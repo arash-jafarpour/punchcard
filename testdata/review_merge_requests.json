@@ -1,0 +1,26 @@
+[
+  {
+    "id": 501,
+    "iid": 41,
+    "project_id": 42,
+    "title": "Identity filters backend",
+    "state": "opened",
+    "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/merge_requests/41",
+    "source_branch": "feat/identity-filters",
+    "target_branch": "master",
+    "created_at": "2026-10-26T09:00:00+03:30",
+    "updated_at": "2026-10-27T11:00:00+03:30",
+    "merged_at": null,
+    "closed_at": null,
+    "author": {
+      "id": 8,
+      "username": "sara",
+      "name": "Sara Ahmadi"
+    },
+    "references": {
+      "short": "!41",
+      "full": "delijan/web/delijan-login-panel!41",
+      "relative": "!41"
+    }
+  }
+]

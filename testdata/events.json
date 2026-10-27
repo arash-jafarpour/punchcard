@@ -1,0 +1,185 @@
+[
+  {
+    "id": 1001,
+    "project_id": 42,
+    "action_name": "pushed",
+    "target_type": null,
+    "target_iid": null,
+    "target_title": null,
+    "created_at": "2026-10-27T15:55:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": {
+      "commit_count": 2,
+      "action": "pushed",
+      "ref_type": "branch",
+      "commit_from": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+      "commit_to": "c20e74377000c7f5e49af014efa0612c394735ff",
+      "ref": "feat/admin-identity-mapping-console",
+      "commit_title": null,
+      "ref_count": null
+    }
+  },
+  {
+    "id": 1002,
+    "project_id": 42,
+    "action_name": "pushed",
+    "target_type": null,
+    "target_iid": null,
+    "target_title": null,
+    "created_at": "2026-10-27T17:05:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": {
+      "commit_count": 1,
+      "action": "pushed",
+      "ref_type": "branch",
+      "commit_from": null,
+      "commit_to": "c20e74377000c7f5e49af014efa0612c394735ff",
+      "ref": "feat/admin-identity-mapping-console",
+      "commit_title": "feat(admin): use a full-width table with a profile sheet",
+      "ref_count": null
+    }
+  },
+  {
+    "id": 1003,
+    "project_id": 88,
+    "action_name": "pushed",
+    "target_type": null,
+    "target_iid": null,
+    "target_title": null,
+    "created_at": "2026-10-27T17:20:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": {
+      "commit_count": 0,
+      "action": "pushed",
+      "ref_type": "tag",
+      "commit_from": null,
+      "commit_to": null,
+      "ref": "v0.4.0",
+      "commit_title": null,
+      "ref_count": 1
+    }
+  },
+  {
+    "id": 1004,
+    "project_id": 77,
+    "action_name": "pushed",
+    "target_type": null,
+    "target_iid": null,
+    "target_title": null,
+    "created_at": "2026-10-27T09:10:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": {
+      "commit_count": 0,
+      "action": "pushed",
+      "ref_type": null,
+      "commit_from": null,
+      "commit_to": null,
+      "ref": null,
+      "commit_title": null,
+      "ref_count": 2
+    }
+  },
+  {
+    "id": 1005,
+    "project_id": 42,
+    "action_name": "closed",
+    "target_type": "Issue",
+    "target_iid": 17,
+    "target_title": "Identity filters",
+    "created_at": "2026-10-27T12:00:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": null
+  },
+  {
+    "id": 1006,
+    "project_id": 42,
+    "action_name": "commented",
+    "target_type": "Note",
+    "target_iid": 18,
+    "target_title": "Identity filters follow-up",
+    "created_at": "2026-10-27T12:30:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": null,
+    "note": {
+      "id": 9001,
+      "body": "Added the filter to the endpoint.\nNext: tests.",
+      "system": false,
+      "noteable_type": "Issue",
+      "noteable_iid": 18,
+      "created_at": "2026-10-27T12:30:00+03:30",
+      "author": {
+        "id": 7,
+        "username": "arash.jafarpour",
+        "name": "Arash Jafarpour"
+      }
+    }
+  },
+  {
+    "id": 1007,
+    "project_id": 42,
+    "action_name": "commented",
+    "target_type": "Note",
+    "target_iid": 41,
+    "target_title": "Identity filters backend",
+    "created_at": "2026-10-27T11:05:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": null,
+    "note": {
+      "id": 9002,
+      "body": "Minor nit: rename the helper.",
+      "system": false,
+      "noteable_type": "MergeRequest",
+      "noteable_iid": 41,
+      "created_at": "2026-10-27T11:05:00+03:30",
+      "author": {
+        "id": 7,
+        "username": "arash.jafarpour",
+        "name": "Arash Jafarpour"
+      }
+    }
+  },
+  {
+    "id": 1008,
+    "project_id": 42,
+    "action_name": "commented",
+    "target_type": "Note",
+    "target_iid": 17,
+    "target_title": "Identity filters",
+    "created_at": "2026-10-27T12:05:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": null,
+    "note": {
+      "id": 9003,
+      "body": "changed milestone to %1",
+      "system": true,
+      "noteable_type": "Issue",
+      "noteable_iid": 17,
+      "created_at": "2026-10-27T12:05:00+03:30",
+      "author": {
+        "id": 7,
+        "username": "arash.jafarpour",
+        "name": "Arash Jafarpour"
+      }
+    }
+  },
+  {
+    "id": 1009,
+    "project_id": 42,
+    "action_name": "pushed",
+    "target_type": null,
+    "target_iid": null,
+    "target_title": null,
+    "created_at": "2026-10-26T23:00:00+03:30",
+    "author_username": "arash.jafarpour",
+    "push_data": {
+      "commit_count": 1,
+      "action": "pushed",
+      "ref_type": "branch",
+      "commit_from": null,
+      "commit_to": "9999999999999999999999999999999999999999",
+      "ref": "master",
+      "commit_title": "yesterday's work",
+      "ref_count": null
+    }
+  }
+]

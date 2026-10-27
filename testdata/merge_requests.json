@@ -1,0 +1,26 @@
+[
+  {
+    "id": 500,
+    "iid": 42,
+    "project_id": 42,
+    "title": "Admin identity mapping console",
+    "state": "merged",
+    "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/merge_requests/42",
+    "source_branch": "feat/admin-identity-mapping-console",
+    "target_branch": "master",
+    "created_at": "2026-10-24T10:00:00+03:30",
+    "updated_at": "2026-10-27T16:30:00+03:30",
+    "merged_at": "2026-10-27T16:30:00+03:30",
+    "closed_at": null,
+    "author": {
+      "id": 7,
+      "username": "arash.jafarpour",
+      "name": "Arash Jafarpour"
+    },
+    "references": {
+      "short": "!42",
+      "full": "delijan/web/delijan-login-panel!42",
+      "relative": "!42"
+    }
+  }
+]

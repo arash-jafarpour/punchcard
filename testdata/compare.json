@@ -1,0 +1,22 @@
+{
+  "commits": [
+    {
+      "id": "c20e74377000c7f5e49af014efa0612c394735ff",
+      "short_id": "c20e7437",
+      "title": "feat(admin): use a full-width table with a profile sheet",
+      "author_name": "Arash Jafarpour",
+      "author_email": "arash@daal.ir",
+      "created_at": "2026-10-27T15:50:00+03:30",
+      "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/commit/c20e74377000c7f5e49af014efa0612c394735ff"
+    },
+    {
+      "id": "813d11afa266b68c29bec1e6f16ed40d0c9a2657",
+      "short_id": "813d11af",
+      "title": "fix(admin): handle identities without an email",
+      "author_name": "Arash Jafarpour",
+      "author_email": "arash@daal.ir",
+      "created_at": "2026-10-27T15:40:00+03:30",
+      "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/commit/813d11afa266b68c29bec1e6f16ed40d0c9a2657"
+    }
+  ]
+}

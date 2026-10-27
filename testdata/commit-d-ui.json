@@ -1,0 +1,16 @@
+{
+  "id": "d0e5f00d11aa22bb33cc44dd55ee66ff77889900",
+  "short_id": "d0e5f00d",
+  "title": "chore: release 0.4.0",
+  "message": "chore: release 0.4.0\n\nBump the version and publish the package.",
+  "author_name": "Arash Jafarpour",
+  "author_email": "arash@daal.ir",
+  "created_at": "2026-10-27T17:18:00+03:30",
+  "authored_date": "2026-10-27T17:15:00+03:30",
+  "web_url": "https://gitlab.daal.ir/delijan/web/d-ui/-/commit/d0e5f00d11aa22bb33cc44dd55ee66ff77889900",
+  "stats": {
+    "additions": 5,
+    "deletions": 1,
+    "total": 6
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "813d11afa266b68c29bec1e6f16ed40d0c9a2657",
+  "short_id": "813d11af",
+  "title": "fix(admin): handle identities without an email",
+  "message": "fix(admin): handle identities without an email",
+  "author_name": "Arash Jafarpour",
+  "author_email": "arash@daal.ir",
+  "created_at": "2026-10-27T15:40:00+03:30",
+  "authored_date": "2026-10-27T15:38:00+03:30",
+  "web_url": "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/commit/813d11afa266b68c29bec1e6f16ed40d0c9a2657",
+  "stats": {
+    "additions": 12,
+    "deletions": 4,
+    "total": 16
+  }
+}
