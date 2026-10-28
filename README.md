@@ -112,9 +112,11 @@ go test ./internal/report -run TestRenderGolden -update
 
 ## Known limitations
 
-- `/events?scope=all` returns activity by every user in projects the token can
-  see. The collector keeps only events whose `author_username` is the
-  authenticated user, so colleagues' pushes and comments never appear.
+- `/events` is queried without `scope=all`. On this instance `scope=all`
+  selects a capped recent-activity feed (20 newest events), which silently
+  truncates older parts of a day once newer events arrive; the default feed is
+  complete, per-user and paginates normally. Events are still filtered by
+  `author_username` as a guard.
 - A push can still carry commits authored by someone else (for example when
   you merge or push a colleague's branch). Those commits are reported with a
   `_(by …)_` suffix and are counted in the summary. Set `GITLAB_AUTHOR_EMAILS`

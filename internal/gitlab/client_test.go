@@ -79,8 +79,8 @@ func TestEventsFollowsNextPage(t *testing.T) {
 		if r.URL.Query().Get("after") != "2026-10-26" || r.URL.Query().Get("before") != "2026-10-28" {
 			t.Errorf("unexpected window: %s", r.URL.RawQuery)
 		}
-		if r.URL.Query().Get("scope") != "all" {
-			t.Errorf("scope = %q, want all", r.URL.Query().Get("scope"))
+		if got := r.URL.Query().Get("scope"); got != "" {
+			t.Errorf("scope = %q, want it unset (scope=all caps the feed)", got)
 		}
 		switch r.URL.Query().Get("page") {
 		case "1":

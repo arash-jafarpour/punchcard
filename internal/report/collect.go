@@ -87,9 +87,9 @@ func (c *Collector) Collect(ctx context.Context, rng date.Range, user *gitlab.Us
 	var works []pushWork
 
 	for _, ev := range events {
-		// scope=all on /events includes other users' activity in projects the
-		// token can see, so keep only events this user performed. MRs are
-		// already scoped by author/reviewer in their own queries.
+		// Keep only events this user performed. The default feed is already
+		// per-user, but this also guards against instance or version
+		// differences (scope=all, for example, includes colleagues' activity).
 		if !strings.EqualFold(strings.TrimSpace(ev.AuthorUsername), user.Username) {
 			continue
 		}

@@ -7,14 +7,18 @@ import (
 )
 
 // Events returns the authenticated user's event feed for the exclusive date
-// window [after, before). GitLab treats both bounds as date-only values, so
-// callers pass one day of slack around the report day.
+// window (after, before). GitLab treats both bounds as date-only and
+// exclusive, so callers pass one day of slack on each side.
+//
+// Do not send scope=all: on this instance that selects a capped
+// "recent activity" feed (20 newest events), which silently truncates
+// historical days. The default feed is the user's own events and paginates
+// without a cap.
 func (c *Client) Events(ctx context.Context, after, before string) ([]Event, error) {
 	if after == "" || before == "" {
 		return nil, errors.New("gitlab: events need both after and before")
 	}
 	q := url.Values{}
-	q.Set("scope", "all")
 	q.Set("after", after)
 	q.Set("before", before)
 	return paginate[Event](ctx, c, "/events", q)
