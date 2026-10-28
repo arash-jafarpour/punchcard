@@ -6,15 +6,17 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/arash-jafarpour/punchcard/internal/config"
 	"github.com/arash-jafarpour/punchcard/internal/date"
@@ -25,87 +27,148 @@ import (
 // reportTimeout bounds the whole run; systemd's TimeoutStartSec is 300s.
 const reportTimeout = 5 * time.Minute
 
-var version = "dev"
+// Build metadata, injected at build time via -ldflags. See the Makefile.
+// The names avoid a clash with the imported date package.
+var (
+	buildVersion = "dev"
+	buildCommit  = "none"
+	buildDate    = "unknown"
+)
+
+// errRunFailed reports a failed run. The failure is already in the log, thus
+// the command does not print the message again.
+var errRunFailed = errors.New("run failed")
+
+// options holds the command-line flags.
+type options struct {
+	date      string
+	envFile   string
+	dryRun    bool
+	reportDir string
+	verbose   bool
+}
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
+// versionString is the text of --version.
+func versionString() string {
+	return fmt.Sprintf("%s (commit %s, built %s, %s/%s)",
+		buildVersion, buildCommit, buildDate, runtime.GOOS, runtime.GOARCH)
+}
+
+// run runs the command and returns the exit code:
+// 0 for success, 1 for a failed run, 2 for a usage problem.
 func run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("punchcard", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	started := false
+	cmd := newRootCommand(&started)
+	cmd.SetArgs(args)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
 
-	var (
-		dateFlag    string
-		dryRun      bool
-		reportDir   string
-		verbose     bool
-		showVersion bool
-	)
-	fs.StringVar(&dateFlag, "date", "", "report date as YYYY-MM-DD (default: yesterday in the report timezone)")
-	fs.BoolVar(&dryRun, "dry-run", false, "write the Markdown file but do not contact Telegram")
-	fs.StringVar(&reportDir, "report-dir", "", "output directory (default: ./reports or REPORT_DIR)")
-	fs.BoolVar(&verbose, "verbose", false, "enable debug logging")
-	fs.BoolVar(&showVersion, "version", false, "print version and exit")
-	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: punchcard [flags]")
-		fmt.Fprintln(stderr)
-		fmt.Fprintln(stderr, "Environment: GITLAB_URL, GITLAB_TOKEN, GITLAB_USERNAME,")
-		fmt.Fprintln(stderr, "GITLAB_AUTHOR_EMAILS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,")
-		fmt.Fprintln(stderr, "TELEGRAM_PROXY, REPORT_TIMEZONE, REPORT_DIR, SEND_EMPTY_REPORT, LOG_LEVEL")
-		fmt.Fprintln(stderr)
-		fs.PrintDefaults()
-	}
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "unexpected argument %q\n", fs.Arg(0))
-		fs.Usage()
-		return 2
-	}
-	if showVersion {
-		fmt.Fprintf(stdout, "punchcard %s\n", version)
+	err := cmd.Execute()
+	if err == nil {
 		return 0
 	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(stderr, "config: %v\n", err)
+	if errors.Is(err, errRunFailed) {
 		return 1
 	}
-	if reportDir != "" {
-		cfg.ReportDir = reportDir
+
+	fmt.Fprintf(stderr, "Error: %v\n", err)
+	if !started {
+		// The command line did not parse. Show the usage text.
+		fmt.Fprintln(stderr)
+		fmt.Fprint(stderr, cmd.UsageString())
+		return 2
 	}
-	if verbose {
+	if errors.Is(err, config.ErrEnvFileNotFound) {
+		return 2
+	}
+	return 1
+}
+
+// newRootCommand builds the command tree. started becomes true when the flags
+// parse and the run starts, thus the caller can tell a usage error from a
+// failed run.
+func newRootCommand(started *bool) *cobra.Command {
+	var opts options
+
+	cmd := &cobra.Command{
+		Use:   "punchcard",
+		Short: "Generate the GitLab daily report",
+		Long: "Generate a Markdown report of one user's GitLab activity for one day.\n" +
+			"Telegram delivery is not implemented yet.\n\n" +
+			"Precedence: flags, then the process environment, then the env file.\n" +
+			"The env file holds KEY=VALUE lines and defaults to\n" +
+			"$XDG_CONFIG_HOME/punchcard/env.",
+		Example: "  punchcard --date 2026-10-27 --dry-run\n" +
+			"  punchcard --env-file ./env --verbose",
+		Version:       versionString(),
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			*started = true
+			return prepare(cmd, opts)
+		},
+	}
+	cmd.SetVersionTemplate("{{.Name}} {{.Version}}\n")
+
+	flags := cmd.Flags()
+	flags.StringVarP(&opts.date, "date", "d", "", "report date as YYYY-MM-DD (default: yesterday in the report timezone)")
+	flags.StringVar(&opts.envFile, "env-file", "", "read KEY=VALUE lines from this file (default: $XDG_CONFIG_HOME/punchcard/env)")
+	flags.BoolVar(&opts.dryRun, "dry-run", false, "write the Markdown file but do not contact Telegram")
+	flags.StringVar(&opts.reportDir, "report-dir", "", "output directory (default: ./reports or REPORT_DIR)")
+	flags.BoolVarP(&opts.verbose, "verbose", "v", false, "enable debug logging")
+	// --version takes -V: cobra would use -v, but that belongs to --verbose.
+	// A flag that we define here stops cobra from adding its own.
+	flags.BoolP("version", "V", false, "print the version and exit")
+
+	return cmd
+}
+
+// prepare loads the configuration, resolves the report day and runs the
+// report. It returns an error that run maps to an exit code.
+func prepare(cmd *cobra.Command, opts options) error {
+	cfg, err := config.Load(loadOptions(opts.envFile))
+	if err != nil {
+		return err
+	}
+	if opts.reportDir != "" {
+		cfg.ReportDir = opts.reportDir
+	}
+	if opts.verbose {
 		cfg.LogLevel = slog.LevelDebug
 	}
-	if err := cfg.Validate(dryRun); err != nil {
-		fmt.Fprintf(stderr, "config: %v\n", err)
-		return 1
+	if err := cfg.Validate(opts.dryRun); err != nil {
+		return err
 	}
 
 	var rng date.Range
-	if dateFlag != "" {
-		rng, err = date.ParseDay(dateFlag, cfg.Location)
+	if opts.date != "" {
+		rng, err = date.ParseDay(opts.date, cfg.Location)
 		if err != nil {
-			fmt.Fprintf(stderr, "config: %v\n", err)
-			return 1
+			return err
 		}
 	} else {
 		rng = date.Yesterday(time.Now(), cfg.Location)
 	}
 
+	stderr := cmd.ErrOrStderr()
 	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	if cfg.EnvFile != "" {
+		logger.Debug("env file loaded", "path", cfg.EnvFile)
+		warnEnvFileMode(logger, cfg.EnvFile)
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 
-	return runReport(ctx, cfg, rng, dryRun, logger)
+	if code := runReport(ctx, cfg, rng, opts.dryRun, logger); code != 0 {
+		return errRunFailed
+	}
+	return nil
 }
 
 // runReport collects the day's activity, writes the Markdown file and — once
@@ -174,4 +237,30 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 
 func mrTotal(s report.Summary) int {
 	return s.MRsOpened + s.MRsMerged + s.MRsClosed + s.MRsUpdated
+}
+
+// loadOptions selects the env file. A file that the user names must exist. A
+// missing default file is not an error, because the environment can be complete.
+func loadOptions(flag string) config.LoadOptions {
+	if flag != "" {
+		return config.LoadOptions{EnvFile: flag, Required: true}
+	}
+	path, err := config.DefaultEnvFile()
+	if err != nil {
+		return config.LoadOptions{}
+	}
+	return config.LoadOptions{EnvFile: path}
+}
+
+// warnEnvFileMode tells the user when other users can read the env file. The
+// file usually holds tokens, thus a mode wider than 0600 is a risk.
+func warnEnvFileMode(logger *slog.Logger, path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		logger.Warn("env file is readable by other users",
+			"path", path, "mode", fmt.Sprintf("%04o", perm))
+	}
 }

@@ -11,7 +11,7 @@ func envFrom(values map[string]string) func(string) string {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	cfg, err := LoadFrom(envFrom(nil))
+	cfg, err := LoadFrom(envFrom(nil), LoadOptions{})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestValidateRequiresGitLabToken(t *testing.T) {
-	cfg, err := LoadFrom(envFrom(nil))
+	cfg, err := LoadFrom(envFrom(nil), LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestValidateRequiresGitLabToken(t *testing.T) {
 }
 
 func TestTelegramRequiredOnlyForRealSend(t *testing.T) {
-	cfg, err := LoadFrom(envFrom(map[string]string{"GITLAB_TOKEN": "token"}))
+	cfg, err := LoadFrom(envFrom(map[string]string{"GITLAB_TOKEN": "token"}), LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestValidateRejectsBadGitLabURL(t *testing.T) {
 	cfg, err := LoadFrom(envFrom(map[string]string{
 		"GITLAB_TOKEN": "token",
 		"GITLAB_URL":   "ftp://gitlab.example.test",
-	}))
+	}), LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,25 +83,25 @@ func TestValidateRejectsBadGitLabURL(t *testing.T) {
 }
 
 func TestLoadRejectsBadTimezone(t *testing.T) {
-	_, err := LoadFrom(envFrom(map[string]string{"REPORT_TIMEZONE": "Mars/Olympus"}))
+	_, err := LoadFrom(envFrom(map[string]string{"REPORT_TIMEZONE": "Mars/Olympus"}), LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "REPORT_TIMEZONE") {
 		t.Errorf("error = %v, want a REPORT_TIMEZONE error", err)
 	}
 }
 
 func TestLoadRejectsBadLogLevel(t *testing.T) {
-	_, err := LoadFrom(envFrom(map[string]string{"LOG_LEVEL": "chatty"}))
+	_, err := LoadFrom(envFrom(map[string]string{"LOG_LEVEL": "chatty"}), LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "LOG_LEVEL") {
 		t.Errorf("error = %v, want a LOG_LEVEL error", err)
 	}
 }
 
 func TestLoadRejectsBadSendEmptyReport(t *testing.T) {
-	_, err := LoadFrom(envFrom(map[string]string{"SEND_EMPTY_REPORT": "sometimes"}))
+	_, err := LoadFrom(envFrom(map[string]string{"SEND_EMPTY_REPORT": "sometimes"}), LoadOptions{})
 	if err == nil || !strings.Contains(err.Error(), "SEND_EMPTY_REPORT") {
 		t.Errorf("error = %v, want a SEND_EMPTY_REPORT error", err)
 	}
-	cfg, err := LoadFrom(envFrom(map[string]string{"SEND_EMPTY_REPORT": "false"}))
+	cfg, err := LoadFrom(envFrom(map[string]string{"SEND_EMPTY_REPORT": "false"}), LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestLoadRejectsBadSendEmptyReport(t *testing.T) {
 func TestAuthorEmailsAreNormalised(t *testing.T) {
 	cfg, err := LoadFrom(envFrom(map[string]string{
 		"GITLAB_AUTHOR_EMAILS": " Arash@Daal.ir, ,second@example.test ",
-	}))
+	}), LoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

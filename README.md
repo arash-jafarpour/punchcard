@@ -28,22 +28,40 @@ Pending:
 
 ```bash
 # Requires Go 1.27+
-go build -o bin/punchcard ./cmd/punchcard
+make build
 
 mkdir -p ~/.config/punchcard
 cp .env.example ~/.config/punchcard/env
 chmod 600 ~/.config/punchcard/env
 $EDITOR ~/.config/punchcard/env
 
-./run.sh --date 2026-10-27 --dry-run
+./bin/punchcard --date 2026-10-27 --dry-run
 ```
 
-`run.sh` sources `${XDG_CONFIG_HOME:-$HOME/.config}/punchcard/env`
-before executing `bin/punchcard`.
+The binary reads the env file itself. It reads
+`$XDG_CONFIG_HOME/punchcard/env`, or `~/.config/punchcard/env` when
+`XDG_CONFIG_HOME` is empty. Use `--env-file PATH` to name another file.
 
 ## Configuration
 
-All configuration comes from the environment; no `.env` parser is bundled.
+The configuration is still a set of environment variables. The binary reads
+the `KEY=VALUE` lines from the env file, thus a manual run and a systemd timer
+use the same file and the same parser.
+
+The lookup order has four levels, highest first:
+
+1. Flags: `--report-dir` and `--verbose`.
+2. The process environment.
+3. The env file.
+4. The defaults in the table below.
+
+The process environment always wins over the file. A missing default file is
+not an error, because the environment can be complete. A file that you name
+with `--env-file` must exist, else the binary exits 2.
+
+The parser reads data only. It accepts `KEY=VALUE` lines, an optional `export`
+prefix, `#` comments, and one pair of surrounding quote marks. It does not
+expand `$VAR` and it does not run commands.
 
 | Variable | Required | Default | Purpose |
 |---|---:|---|---|
@@ -59,8 +77,9 @@ All configuration comes from the environment; no `.env` parser is bundled.
 | `SEND_EMPTY_REPORT` | no | `true` | send a no-activity heartbeat |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 
-Flags: `--date YYYY-MM-DD`, `--dry-run`, `--report-dir PATH`, `--verbose`,
-`--version`, `--help`.
+Flags: `-d/--date YYYY-MM-DD`, `--env-file PATH`, `--dry-run`,
+`--report-dir PATH`, `-v/--verbose`, `-V/--version`, `-h/--help`.
+Keep the long forms in scripts and systemd units.
 
 ## How the report is built
 
@@ -84,8 +103,8 @@ counts and the body can never drift apart.
 ## Layout
 
 ```text
-cmd/punchcard/          flags, wiring, exit codes
-internal/config/       environment parsing and validation
+cmd/punchcard/          cobra command, flags, wiring, exit codes
+internal/config/       env file, environment parsing and validation
 internal/date/         Asia/Tehran ranges and GitLab date parameters
 internal/gitlab/       HTTP client, endpoints, types
 internal/report/       collection, normalization, Markdown
@@ -93,7 +112,39 @@ internal/testutil/     fixture loader and fake GitLab server
 testdata/              sanitized API fixtures
 ```
 
+## Build
+
+```bash
+make build       # bin/punchcard, stamped with version, commit and date
+make install     # go install into GOBIN
+make run         # dry run with the fresh binary; ARGS is forwarded
+make completion  # shell completion for bash, zsh or fish
+make clean       # remove bin/
+```
+
+`make build` also installs shell completion for the current `$SHELL`. The
+binary reports its build data:
+
+```text
+$ ./bin/punchcard --version
+punchcard 003e46c-dirty (commit 003e46c, built 2026-10-28T19:16:56Z, linux/amd64)
+```
+
+Forward arguments to a manual run with `ARGS`:
+
+```bash
+make run ARGS="--date 2026-10-27"
+```
+
 ## Tests
+
+```bash
+make check   # gofmt check, vet, tests
+make race    # tests with the race detector
+make build   # bin/punchcard, stamped with the git description
+```
+
+The targets call these commands:
 
 ```bash
 gofmt -l .

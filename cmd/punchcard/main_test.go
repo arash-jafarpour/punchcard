@@ -12,6 +12,9 @@ import (
 
 func baseEnv(t *testing.T, overrides map[string]string) {
 	t.Helper()
+	// Isolate the default env file. A test must not read the user's real one.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	values := map[string]string{
 		"GITLAB_URL":           "",
 		"GITLAB_TOKEN":         "test-token",
@@ -51,14 +54,57 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
+func TestShortVersionAndHelp(t *testing.T) {
+	baseEnv(t, nil)
+
+	code, stdout, _ := execute(t, "-V")
+	if code != 0 || !strings.Contains(stdout, "punchcard dev") {
+		t.Errorf("-V: code = %d, stdout = %q", code, stdout)
+	}
+
+	code, stdout, _ = execute(t, "-h")
+	if code != 0 || !strings.Contains(stdout, "punchcard [flags]") {
+		t.Errorf("-h: code = %d, stdout = %q", code, stdout)
+	}
+}
+
+func TestShortDateAndVerbose(t *testing.T) {
+	stub := newEmptyStub(t)
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	// The debug log line reports the env file, thus write one.
+	envDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "punchcard")
+	if err := os.MkdirAll(envDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("REPORT_DIR=" + t.TempDir() + "\n")
+	if err := os.WriteFile(filepath.Join(envDir, "env"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := execute(t, "-v", "-d", "2026-10-27", "--dry-run")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "level=DEBUG") {
+		t.Errorf("-v did not enable debug logging: %q", stderr)
+	}
+	if !strings.Contains(stderr, "date=2026-10-27") {
+		t.Errorf("-d did not set the report date: %q", stderr)
+	}
+}
+
 func TestHelpExitsZero(t *testing.T) {
 	baseEnv(t, nil)
-	code, _, stderr := execute(t, "--help")
+	code, stdout, _ := execute(t, "--help")
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr, "usage: punchcard") {
-		t.Errorf("stderr = %q", stderr)
+	if !strings.Contains(stdout, "punchcard [flags]") {
+		t.Errorf("stdout = %q, want the usage line", stdout)
+	}
+	if !strings.Contains(stdout, "--env-file") {
+		t.Errorf("stdout = %q, want the env-file flag", stdout)
 	}
 }
 
@@ -68,7 +114,7 @@ func TestUnknownFlagExitsTwo(t *testing.T) {
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "flag provided but not defined") {
+	if !strings.Contains(stderr, "unknown flag") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
@@ -79,7 +125,7 @@ func TestUnexpectedArgumentExitsTwo(t *testing.T) {
 	if code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "unexpected argument") {
+	if !strings.Contains(stderr, "unknown command") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
@@ -211,5 +257,59 @@ func TestInvalidDateExitsOne(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "invalid date") {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestMissingExplicitEnvFileExitsTwo(t *testing.T) {
+	baseEnv(t, nil)
+	path := filepath.Join(t.TempDir(), "absent")
+
+	code, _, stderr := execute(t, "--env-file", path, "--dry-run")
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "does not exist") || !strings.Contains(stderr, path) {
+		t.Errorf("stderr = %q, want a missing-file error that names the path", stderr)
+	}
+}
+
+func TestDefaultEnvFileSuppliesConfig(t *testing.T) {
+	stub := newEmptyStub(t)
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	reportDir := t.TempDir()
+	envDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "punchcard")
+	if err := os.MkdirAll(envDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	envPath := filepath.Join(envDir, "env")
+	if err := os.WriteFile(envPath, []byte("REPORT_DIR="+reportDir+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := execute(t, "--date", "2026-10-27", "--dry-run")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(reportDir, "2026-10-27.md")); err != nil {
+		t.Errorf("the default env file did not set REPORT_DIR: %v", err)
+	}
+}
+
+func TestEnvFileWiderThan0600Warns(t *testing.T) {
+	stub := newEmptyStub(t)
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	envPath := filepath.Join(t.TempDir(), "env")
+	if err := os.WriteFile(envPath, []byte("REPORT_DIR="+t.TempDir()+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := execute(t, "--env-file", envPath, "--date", "2026-10-27", "--dry-run")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "readable by other users") {
+		t.Errorf("stderr = %q, want a mode warning", stderr)
 	}
 }

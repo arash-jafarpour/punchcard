@@ -1,6 +1,7 @@
 // Package config reads and validates the process configuration from the
-// environment. Configuration is intentionally env-only: systemd uses
-// EnvironmentFile and run.sh sources the same file for manual runs.
+// environment and from an optional env file. The binary reads the env file
+// itself, thus systemd and a manual run use the same file and the same parser.
+// The process environment wins over the file.
 package config
 
 import (
@@ -37,14 +38,33 @@ type Config struct {
 	ReportDir        string
 	SendEmptyReport  bool
 	LogLevel         slog.Level
+
+	// EnvFile is the file that Load read, or empty when it read none.
+	EnvFile string
 }
 
-// Load reads the configuration from the process environment.
-func Load() (Config, error) { return LoadFrom(os.Getenv) }
+// Load reads the configuration. It reads the env file first, then the process
+// environment. Process environment values win over file values.
+func Load(opts LoadOptions) (Config, error) { return LoadFrom(os.Getenv, opts) }
 
 // LoadFrom is Load with an injectable environment lookup, for tests.
-func LoadFrom(getenv func(string) string) (Config, error) {
+func LoadFrom(getenv func(string) string, opts LoadOptions) (Config, error) {
+	file := map[string]string{}
+	source := ""
+	if opts.EnvFile != "" {
+		values, found, err := readEnvFile(opts.EnvFile, opts.Required)
+		if err != nil {
+			return Config{}, err
+		}
+		if found {
+			file = values
+			source = opts.EnvFile
+		}
+	}
+	getenv = lookup(getenv, file)
+
 	cfg := Config{
+		EnvFile:          source,
 		GitLabURL:        strings.TrimSpace(getenv("GITLAB_URL")),
 		GitLabToken:      strings.TrimSpace(getenv("GITLAB_TOKEN")),
 		GitLabUsername:   strings.TrimSpace(getenv("GITLAB_USERNAME")),
