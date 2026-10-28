@@ -73,11 +73,11 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("could not parse release tag %q: %w", release.TagName, err)
 	}
 	if !latest.GreaterThan(current) {
-		fmt.Fprintf(out, "punchcard is already up to date (v%s)\n", current)
+		_, _ = fmt.Fprintf(out, "punchcard is already up to date (v%s)\n", current)
 		return nil
 	}
 	if opts.CheckOnly {
-		fmt.Fprintf(out, "new version available: v%s (current v%s)\n", latest, current)
+		_, _ = fmt.Fprintf(out, "new version available: v%s (current v%s)\n", latest, current)
 		return nil
 	}
 
@@ -88,7 +88,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	fmt.Fprintf(out, "updating punchcard v%s -> v%s ...\n", current, latest)
+	_, _ = fmt.Fprintf(out, "updating punchcard v%s -> v%s ...\n", current, latest)
 	if err := c.install(ctx, release, exe, out); err != nil {
 		return fmt.Errorf(
 			"update failed: %w\n"+
@@ -97,9 +97,9 @@ func Run(ctx context.Context, opts Options) error {
 		)
 	}
 
-	fmt.Fprintf(out, "successfully updated punchcard to v%s\n", latest)
+	_, _ = fmt.Fprintf(out, "successfully updated punchcard to v%s\n", latest)
 	if release.Body != "" {
-		fmt.Fprintf(out, "\n%s\n", release.Body)
+		_, _ = fmt.Fprintf(out, "\n%s\n", release.Body)
 	}
 	return nil
 }
@@ -133,7 +133,7 @@ func (c *client) install(ctx context.Context, release *ghRelease, exe string, ou
 		return err
 	}
 
-	fmt.Fprintf(out, "downloading %s (%s)\n", asset.Name, humanSize(asset.Size))
+	_, _ = fmt.Fprintf(out, "downloading %s (%s)\n", asset.Name, humanSize(asset.Size))
 	body, err := c.download(ctx, asset.BrowserDownloadURL)
 	if err != nil {
 		return fmt.Errorf("failed to download %s: %w", asset.Name, err)
@@ -151,7 +151,7 @@ func (c *client) install(ctx context.Context, release *ghRelease, exe string, ou
 			asset.Name, got, want,
 		)
 	}
-	fmt.Fprintln(out, "checksum verified")
+	_, _ = fmt.Fprintln(out, "checksum verified")
 
 	tmp, err := os.CreateTemp(filepath.Dir(exe), ".punchcard-update-*")
 	if err != nil {

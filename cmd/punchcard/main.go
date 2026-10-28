@@ -73,11 +73,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	fmt.Fprintf(stderr, "Error: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "Error: %v\n", err)
 	if !started {
 		// The command line did not parse. Show the usage text.
-		fmt.Fprintln(stderr)
-		fmt.Fprint(stderr, cmd.UsageString())
+		_, _ = fmt.Fprintln(stderr)
+		_, _ = fmt.Fprint(stderr, cmd.UsageString())
 		return 2
 	}
 	if errors.Is(err, config.ErrEnvFileNotFound) {
