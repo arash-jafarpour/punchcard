@@ -2,7 +2,10 @@ module github.com/arash-jafarpour/punchcard
 
 go 1.27
 
-require github.com/spf13/cobra v1.10.2
+require (
+	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/spf13/cobra v1.10.2
+)
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

@@ -106,12 +106,18 @@ func newRootCommand(started *bool) *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		// Run before any command body. run() reads the flag to tell a usage
+		// error (exit 2) from a failed run (exit 1).
+		PersistentPreRunE: func(*cobra.Command, []string) error {
 			*started = true
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return prepare(cmd, opts)
 		},
 	}
 	cmd.SetVersionTemplate("{{.Name}} {{.Version}}\n")
+	cmd.AddCommand(newUpdateCommand())
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.date, "date", "d", "", "report date as YYYY-MM-DD (default: yesterday in the report timezone)")

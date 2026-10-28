@@ -16,6 +16,7 @@ Working:
   applies the exit codes and logs to stderr via `slog`
 - configuration, `Asia/Tehran` date math, GitLab client, collection,
   deduplication and the Markdown renderer
+- `punchcard update`: replaces the binary with the latest GitHub release
 
 Pending:
 
@@ -81,6 +82,9 @@ Flags: `-d/--date YYYY-MM-DD`, `--env-file PATH`, `--dry-run`,
 `--report-dir PATH`, `-v/--verbose`, `-V/--version`, `-h/--help`.
 Keep the long forms in scripts and systemd units.
 
+Commands: `update` (see below), `completion SHELL`, `help`. A bare `punchcard`
+runs the report.
+
 ## How the report is built
 
 1. `GET /user` identifies the user (cached for the process).
@@ -103,13 +107,16 @@ counts and the body can never drift apart.
 ## Layout
 
 ```text
-cmd/punchcard/          cobra command, flags, wiring, exit codes
+cmd/punchcard/          cobra commands, flags, wiring, exit codes
 internal/config/       env file, environment parsing and validation
 internal/date/         Asia/Tehran ranges and GitLab date parameters
 internal/gitlab/       HTTP client, endpoints, types
 internal/report/       collection, normalization, Markdown
+internal/update/       GitHub release client and binary replacement
 internal/testutil/     fixture loader and fake GitLab server
 testdata/              sanitized API fixtures
+.github/workflows/     ci and release
+.goreleaser.yaml       release targets, archives, checksums
 ```
 
 ## Build
@@ -135,6 +142,42 @@ Forward arguments to a manual run with `ARGS`:
 ```bash
 make run ARGS="--date 2026-10-27"
 ```
+
+## Update
+
+`punchcard update` replaces the running binary with the latest release:
+
+```bash
+punchcard update --check   # report the newest version, install nothing
+punchcard update           # install it and print the release notes from
+```
+
+The updater reads `https://api.github.com/repos/arash-jafarpour/punchcard`.
+It selects `punchcard_<os>_<arch>.tar.gz`, or `.zip` on Windows. It verifies
+the archive against the `<asset>.sha256` sidecar before it replaces the binary,
+so a bad download leaves the old binary in place.
+
+`GITHUB_TOKEN` is optional. The repository is public, thus the token only
+raises the API rate limit.
+
+A development build reports `dev` and cannot update itself. Install from a
+release to enable the command.
+
+## Releases
+
+A `v*` tag starts the release job:
+
+```bash
+git tag -a v0.1.0 -m "punchcard v0.1.0"
+git push origin v0.1.0
+```
+
+GoReleaser builds six targets (linux, darwin and windows, on amd64 and arm64),
+writes one archive per target with a `.sha256` sidecar, and publishes the
+release notes from the Conventional Commits since the last tag. You can also
+start the job by hand from the Actions tab with an existing tag.
+
+`dist/` holds the local build output and is not committed.
 
 ## Tests
 

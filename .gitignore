@@ -3,3 +3,4 @@
 !.env.example
 reports/
 bin/
+dist/

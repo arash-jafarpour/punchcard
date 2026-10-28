@@ -1,0 +1,71 @@
+version: 2
+
+project_name: punchcard
+
+builds:
+  - id: punchcard
+    main: ./cmd/punchcard
+    binary: punchcard
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.buildVersion={{ .Version }}
+      - -X main.buildCommit={{ .Commit }}
+      - -X main.buildDate={{ .Date }}
+
+archives:
+  - id: punchcard
+    # Must stay "{project}_{goos}_{goarch}" so `punchcard update` can find the
+    # asset for the running platform. e.g. punchcard_linux_amd64.tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  # Emit one "<asset>.sha256" per artifact. The updater fetches exactly that
+  # sidecar and verifies the archive before it replaces the binary.
+  split: true
+
+changelog:
+  # Generate release notes from Conventional Commits between tags and group
+  # them in the GitHub release body. `punchcard update` prints exactly this
+  # text after a successful update.
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.*\))?:'
+      order: 10
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.*\))?:'
+      order: 20
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  draft: false
+  # Re-releasing the same tag (e.g. after moving it) hits GitHub's 422
+  # already_exists because asset names carry no version. On that error,
+  # delete the conflicting asset and retry the upload.
+  replace_existing_artifacts: true

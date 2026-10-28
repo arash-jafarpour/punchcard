@@ -313,3 +313,20 @@ func TestEnvFileWiderThan0600Warns(t *testing.T) {
 		t.Errorf("stderr = %q, want a mode warning", stderr)
 	}
 }
+
+func TestUpdateNeedsNoGitLabConfig(t *testing.T) {
+	// A test build reports "dev", thus update stops before any network call.
+	// An empty GITLAB_TOKEN shows that the command skips the report config.
+	baseEnv(t, map[string]string{"GITLAB_TOKEN": ""})
+
+	code, _, stderr := execute(t, "update", "--check")
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "development build") {
+		t.Errorf("stderr = %q, want the development-build error", stderr)
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Errorf("a failed run printed the usage text: %q", stderr)
+	}
+}
