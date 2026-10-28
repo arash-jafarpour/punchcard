@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/date"
+	"github.com/arash-jafarpour/punchcard/internal/date"
 )
 
 var updateGolden = flag.Bool("update", false, "update golden files")

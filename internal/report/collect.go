@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/date"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/gitlab"
+	"github.com/arash-jafarpour/punchcard/internal/date"
+	"github.com/arash-jafarpour/punchcard/internal/gitlab"
 )
 
 const (

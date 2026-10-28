@@ -21,7 +21,7 @@ import (
 const (
 	apiPrefix         = "/api/v4"
 	perPage           = 100
-	defaultUserAgent  = "gitlab-daily-report/1.0"
+	defaultUserAgent  = "punchcard/1.0"
 	defaultMaxRetries = 3
 	requestTimeout    = 30 * time.Second
 	maxResponseBytes  = 32 << 20

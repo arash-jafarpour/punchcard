@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/gitlab"
+	"github.com/arash-jafarpour/punchcard/internal/gitlab"
 )
 
 // Fixture reads a file from the repository's testdata directory. Tests run

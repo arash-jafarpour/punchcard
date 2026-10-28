@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/gitlab"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/testutil"
+	"github.com/arash-jafarpour/punchcard/internal/gitlab"
+	"github.com/arash-jafarpour/punchcard/internal/testutil"
 )
 
 const token = "secret-token"
@@ -38,7 +38,7 @@ func TestCurrentUserSendsAuthAndCaches(t *testing.T) {
 	if got := headers.Get("PRIVATE-TOKEN"); got != token {
 		t.Errorf("PRIVATE-TOKEN = %q, want %q", got, token)
 	}
-	if got := headers.Get("User-Agent"); !strings.HasPrefix(got, "gitlab-daily-report/") {
+	if got := headers.Get("User-Agent"); !strings.HasPrefix(got, "punchcard/") {
 		t.Errorf("User-Agent = %q", got)
 	}
 

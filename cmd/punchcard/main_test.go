@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/testutil"
+	"github.com/arash-jafarpour/punchcard/internal/testutil"
 )
 
 func baseEnv(t *testing.T, overrides map[string]string) {
@@ -46,7 +46,7 @@ func TestVersionFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout, "gitlab-daily-report dev") {
+	if !strings.Contains(stdout, "punchcard dev") {
 		t.Errorf("stdout = %q", stdout)
 	}
 }
@@ -57,7 +57,7 @@ func TestHelpExitsZero(t *testing.T) {
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stderr, "usage: gitlab-daily-report") {
+	if !strings.Contains(stderr, "usage: punchcard") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }

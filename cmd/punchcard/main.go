@@ -1,4 +1,4 @@
-// Command daily-report generates the GitLab daily report and sends it to
+// Command punchcard generates the GitLab daily report and sends it to
 // Telegram. Telegram delivery is wired in a later step; everything up to and
 // including the Markdown file is functional.
 package main
@@ -16,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/config"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/date"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/gitlab"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/report"
+	"github.com/arash-jafarpour/punchcard/internal/config"
+	"github.com/arash-jafarpour/punchcard/internal/date"
+	"github.com/arash-jafarpour/punchcard/internal/gitlab"
+	"github.com/arash-jafarpour/punchcard/internal/report"
 )
 
 // reportTimeout bounds the whole run; systemd's TimeoutStartSec is 300s.
@@ -30,7 +30,7 @@ var version = "dev"
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("gitlab-daily-report", flag.ContinueOnError)
+	fs := flag.NewFlagSet("punchcard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var (
@@ -46,7 +46,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&verbose, "verbose", false, "enable debug logging")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: gitlab-daily-report [flags]")
+		fmt.Fprintln(stderr, "usage: punchcard [flags]")
 		fmt.Fprintln(stderr)
 		fmt.Fprintln(stderr, "Environment: GITLAB_URL, GITLAB_TOKEN, GITLAB_USERNAME,")
 		fmt.Fprintln(stderr, "GITLAB_AUTHOR_EMAILS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,")
@@ -67,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if showVersion {
-		fmt.Fprintf(stdout, "gitlab-daily-report %s\n", version)
+		fmt.Fprintf(stdout, "punchcard %s\n", version)
 		return 0
 	}
 

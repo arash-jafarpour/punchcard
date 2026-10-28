@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/date"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/gitlab"
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/testutil"
+	"github.com/arash-jafarpour/punchcard/internal/date"
+	"github.com/arash-jafarpour/punchcard/internal/gitlab"
+	"github.com/arash-jafarpour/punchcard/internal/testutil"
 )
 
 func TestCollectFixtureDay(t *testing.T) {

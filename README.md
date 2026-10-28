@@ -1,4 +1,4 @@
-# gitlab-daily-report
+# punchcard
 
 Generates a deterministic English Markdown report of yesterday's GitLab
 activity for one user and (eventually) sends it to Telegram as a document.
@@ -7,7 +7,6 @@ activity for one user and (eventually) sends it to Telegram as a document.
 - Report day: yesterday in `Asia/Tehran` by default
 - Data: commits/pushes, merge requests, reviews, issues and issue comments
 - Output: `reports/YYYY-MM-DD.md`, mode `0600`
-- Full design: [PLAN-gitlab-daily-report.md](PLAN-gitlab-daily-report.md)
 
 ## Status
 
@@ -29,18 +28,18 @@ Pending:
 
 ```bash
 # Requires Go 1.27+
-go build -o bin/gitlab-daily-report ./cmd/daily-report
+go build -o bin/punchcard ./cmd/punchcard
 
-mkdir -p ~/.config/gitlab-daily-report
-cp .env.example ~/.config/gitlab-daily-report/env
-chmod 600 ~/.config/gitlab-daily-report/env
-$EDITOR ~/.config/gitlab-daily-report/env
+mkdir -p ~/.config/punchcard
+cp .env.example ~/.config/punchcard/env
+chmod 600 ~/.config/punchcard/env
+$EDITOR ~/.config/punchcard/env
 
 ./run.sh --date 2026-10-27 --dry-run
 ```
 
-`run.sh` sources `${XDG_CONFIG_HOME:-$HOME/.config}/gitlab-daily-report/env`
-before executing `bin/gitlab-daily-report`.
+`run.sh` sources `${XDG_CONFIG_HOME:-$HOME/.config}/punchcard/env`
+before executing `bin/punchcard`.
 
 ## Configuration
 
@@ -85,7 +84,7 @@ counts and the body can never drift apart.
 ## Layout
 
 ```text
-cmd/daily-report/      flags, wiring, exit codes
+cmd/punchcard/          flags, wiring, exit codes
 internal/config/       environment parsing and validation
 internal/date/         Asia/Tehran ranges and GitLab date parameters
 internal/gitlab/       HTTP client, endpoints, types

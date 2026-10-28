@@ -7,12 +7,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-env_file="${ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/gitlab-daily-report/env}"
-bin="${BIN:-$root/bin/gitlab-daily-report}"
+env_file="${ENV_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/punchcard/env}"
+bin="${BIN:-$root/bin/punchcard}"
 
 if [[ ! -x "$bin" ]]; then
     echo "run.sh: no binary at $bin" >&2
-    echo "run.sh: build it with: go build -o bin/gitlab-daily-report ./cmd/daily-report" >&2
+    echo "run.sh: build it with: go build -o bin/punchcard ./cmd/punchcard" >&2
     exit 1
 fi
 

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.daal.ir/delijan/tools/gitlab-daily-report/internal/date"
+	"github.com/arash-jafarpour/punchcard/internal/date"
 )
 
 // Defaults used when the corresponding environment variable is empty.

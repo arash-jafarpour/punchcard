@@ -1,3 +1,3 @@
-module gitlab.daal.ir/delijan/tools/gitlab-daily-report
+module github.com/arash-jafarpour/punchcard
 
 go 1.27
