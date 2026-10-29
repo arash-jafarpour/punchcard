@@ -1,6 +1,5 @@
-// Command punchcard generates the GitLab daily report and sends it to
-// Telegram. Telegram delivery is wired in a later step; everything up to and
-// including the Markdown file is functional.
+// Command punchcard generates the GitLab daily report and sends the Markdown
+// file to Telegram as a document with a short caption.
 package main
 
 import (
@@ -13,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +22,7 @@ import (
 	"github.com/arash-jafarpour/punchcard/internal/date"
 	"github.com/arash-jafarpour/punchcard/internal/gitlab"
 	"github.com/arash-jafarpour/punchcard/internal/report"
+	"github.com/arash-jafarpour/punchcard/internal/telegram"
 )
 
 // reportTimeout bounds the whole run; systemd's TimeoutStartSec is 300s.
@@ -96,7 +97,8 @@ func newRootCommand(started *bool) *cobra.Command {
 		Use:   "punchcard",
 		Short: "Generate the GitLab daily report",
 		Long: "Generate a Markdown report of one user's GitLab activity for one day.\n" +
-			"Telegram delivery is not implemented yet.\n\n" +
+			"The Markdown file is sent to TELEGRAM_CHAT_ID as a document with a short\n" +
+			"caption unless --dry-run is set.\n\n" +
 			"Precedence: flags, then the process environment, then the env file.\n" +
 			"The env file holds KEY=VALUE lines and defaults to\n" +
 			"$XDG_CONFIG_HOME/punchcard/env.",
@@ -177,9 +179,9 @@ func prepare(cmd *cobra.Command, opts options) error {
 	return nil
 }
 
-// runReport collects the day's activity, writes the Markdown file and — once
-// delivery is wired — uploads it. The file is always written before any send
-// so a delivery failure never loses the data.
+// runReport collects the day's activity, writes the Markdown file and uploads
+// it to Telegram. The file is always written before any send so a delivery
+// failure never loses the data.
 func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bool, logger *slog.Logger) int {
 	client, err := gitlab.New(cfg.GitLabURL, cfg.GitLabToken)
 	if err != nil {
@@ -237,12 +239,75 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 		return 0
 	}
 
-	logger.Error("telegram delivery is not implemented yet", "date", rep.Date, "path", displayPath)
-	return 1
+	// Only a real send builds a client, thus neither skip branch opens a
+	// socket. WithProxy("") is a direct connection, so pass the value as-is.
+	tg, err := telegram.New(cfg.TelegramAPIBase, cfg.TelegramBotToken,
+		telegram.WithProxy(cfg.TelegramProxy))
+	if err != nil {
+		logger.Error("telegram client", "error", err)
+		return 1
+	}
+
+	// Upload the file under the same absolute path the logs name, so a
+	// relative REPORT_DIR cannot desynchronise the two.
+	res, err := tg.SendDocument(ctx, cfg.TelegramChatID, displayPath, caption(*rep))
+	if err != nil {
+		// The error is logged as returned: the client already redacts the
+		// token, and extra formatting could reintroduce it. The report file
+		// stays on disk.
+		logger.Error("telegram delivery failed",
+			"date", rep.Date,
+			"path", displayPath,
+			"error", err,
+		)
+		return 1
+	}
+
+	logger.Info("telegram delivered",
+		"date", rep.Date,
+		"chat_id", cfg.TelegramChatID,
+		"message_id", res.MessageID,
+		"path", displayPath,
+	)
+	return 0
 }
 
 func mrTotal(s report.Summary) int {
 	return s.MRsOpened + s.MRsMerged + s.MRsClosed + s.MRsUpdated
+}
+
+// caption is the short plain-text line that rides with the uploaded report.
+// Zero-count parts are omitted, and a day without activity says so instead of
+// listing zeros.
+func caption(rep report.Report) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "GitLab daily report %s", rep.Date)
+
+	s := rep.Summary
+	if !s.HasActivity() {
+		b.WriteString(" · no activity")
+		return b.String()
+	}
+	if s.Projects > 0 {
+		fmt.Fprintf(&b, " · %d %s", s.Projects, plural(s.Projects, "project"))
+	}
+	if s.Commits > 0 {
+		fmt.Fprintf(&b, " · %d %s", s.Commits, plural(s.Commits, "commit"))
+	}
+	if s.Additions+s.Deletions > 0 {
+		// U+2212 minus, and both numbers always show, so the pair reads as
+		// one +/- figure.
+		fmt.Fprintf(&b, " · +%d/\u2212%d", s.Additions, s.Deletions)
+	}
+	return b.String()
+}
+
+// plural returns singular for exactly one and the regular plural otherwise.
+func plural(n int, singular string) string {
+	if n == 1 {
+		return singular
+	}
+	return singular + "s"
 }
 
 // loadOptions selects the env file. A file that the user names must exist. A

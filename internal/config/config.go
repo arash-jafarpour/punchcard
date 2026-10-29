@@ -19,8 +19,9 @@ import (
 
 // Defaults used when the corresponding environment variable is empty.
 const (
-	DefaultGitLabURL = "https://gitlab.daal.ir"
-	DefaultReportDir = "./reports"
+	DefaultGitLabURL       = "https://gitlab.daal.ir"
+	DefaultReportDir       = "./reports"
+	DefaultTelegramAPIBase = "https://api.telegram.org"
 )
 
 // Config is the fully resolved configuration. Location is derived from
@@ -33,6 +34,7 @@ type Config struct {
 	TelegramBotToken string
 	TelegramChatID   string
 	TelegramProxy    string
+	TelegramAPIBase  string
 	Timezone         string
 	Location         *time.Location
 	ReportDir        string
@@ -72,6 +74,7 @@ func LoadFrom(getenv func(string) string, opts LoadOptions) (Config, error) {
 		TelegramBotToken: strings.TrimSpace(getenv("TELEGRAM_BOT_TOKEN")),
 		TelegramChatID:   strings.TrimSpace(getenv("TELEGRAM_CHAT_ID")),
 		TelegramProxy:    strings.TrimSpace(getenv("TELEGRAM_PROXY")),
+		TelegramAPIBase:  strings.TrimSpace(getenv("TELEGRAM_API_BASE")),
 		Timezone:         strings.TrimSpace(getenv("REPORT_TIMEZONE")),
 		ReportDir:        strings.TrimSpace(getenv("REPORT_DIR")),
 	}
@@ -84,6 +87,11 @@ func LoadFrom(getenv func(string) string, opts LoadOptions) (Config, error) {
 	}
 	if cfg.ReportDir == "" {
 		cfg.ReportDir = DefaultReportDir
+	}
+	if cfg.TelegramAPIBase == "" {
+		cfg.TelegramAPIBase = DefaultTelegramAPIBase
+	} else if trimmed := strings.TrimRight(cfg.TelegramAPIBase, "/"); trimmed != "" {
+		cfg.TelegramAPIBase = trimmed
 	}
 
 	loc, err := date.ParseTimezone(cfg.Timezone)
@@ -116,7 +124,10 @@ func (c Config) Validate(dryRun bool) error {
 	if c.GitLabToken == "" {
 		return errors.New("GITLAB_TOKEN is required")
 	}
-	if err := validateURL(c.GitLabURL); err != nil {
+	if err := validateHTTPURL("GITLAB_URL", c.GitLabURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("TELEGRAM_API_BASE", c.TelegramAPIBase); err != nil {
 		return err
 	}
 	if c.ReportDir == "" {
@@ -158,18 +169,18 @@ func ValidateProxy(raw string) error {
 	return nil
 }
 
-func validateURL(raw string) error {
+func validateHTTPURL(name, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid GITLAB_URL: %w", err)
+		return fmt.Errorf("invalid %s: %w", name, err)
 	}
 	switch u.Scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("invalid GITLAB_URL %q: want an http or https URL", raw)
+		return fmt.Errorf("invalid %s %q: want an http or https URL", name, raw)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("invalid GITLAB_URL %q: missing host", raw)
+		return fmt.Errorf("invalid %s %q: missing host", name, raw)
 	}
 	return nil
 }

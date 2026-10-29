@@ -1,7 +1,7 @@
 # punchcard
 
 Generates a deterministic English Markdown report of yesterday's GitLab
-activity for one user and (eventually) sends it to Telegram as a document.
+activity for one user and sends it to Telegram as a document.
 
 - Instance: `https://gitlab.daal.ir`
 - Report day: yesterday in `Asia/Tehran` by default
@@ -17,12 +17,12 @@ Working:
 - configuration, `Asia/Tehran` date math, GitLab client, collection,
   deduplication and the Markdown renderer
 - `punchcard update`: replaces the binary with the latest GitHub release
+- Telegram delivery: a non-dry-run uploads `reports/YYYY-MM-DD.md` to
+  `TELEGRAM_CHAT_ID` with `sendDocument` and a short caption, exits 0 after
+  the API confirms, and exits 1 without deleting the file when delivery fails
 
 Pending:
 
-- Telegram `sendDocument` and the SOCKS5/HTTP proxy transport (a non-dry-run
-  currently writes the file, then exits 1 with `telegram delivery is not
-  implemented yet`)
 - systemd units and deployment docs
 
 ## Quick start
@@ -73,6 +73,7 @@ expand `$VAR` and it does not run commands.
 | `TELEGRAM_BOT_TOKEN` | yes unless `--dry-run` | — | BotFather token |
 | `TELEGRAM_CHAT_ID` | yes unless `--dry-run` | — | numeric chat id |
 | `TELEGRAM_PROXY` | no | empty | `socks5h://127.0.0.1:1089` on the laptop |
+| `TELEGRAM_API_BASE` | no | `https://api.telegram.org` | Bot API base; change only for a self-hosted server or tests |
 | `REPORT_TIMEZONE` | no | `Asia/Tehran` | day boundaries and display time |
 | `REPORT_DIR` | no | `./reports` | where Markdown files are written |
 | `SEND_EMPTY_REPORT` | no | `true` | send a no-activity heartbeat |
@@ -84,6 +85,65 @@ Keep the long forms in scripts and systemd units.
 
 Commands: `update` (see below), `completion SHELL`, `help`. A bare `punchcard`
 runs the report.
+
+## Telegram delivery
+
+A run always writes the report first. It then uploads the same file to one
+chat, unless the run is a dry run.
+
+### What is sent
+
+The `.md` as a document named `YYYY-MM-DD.md` with `text/markdown`, plus one
+plain-text caption and no `parse_mode`:
+
+```text
+GitLab daily report 2026-10-27 · 3 projects · 12 commits · +240/−80
+```
+
+Zero-count parts are left out. A day without activity sends
+`GitLab daily report <date> · no activity`, so `SEND_EMPTY_REPORT=true` still
+produces a heartbeat. `--dry-run` and `SEND_EMPTY_REPORT=false` write the file
+and skip the upload.
+
+### Create the bot and find the chat
+
+1. Run `/newbot` in [BotFather](https://t.me/BotFather) and put the token in
+   `TELEGRAM_BOT_TOKEN`.
+2. Give the bot a chat. It cannot start one itself, thus the recipient must
+   send `/start` to the bot, or you must add the bot to a group.
+3. Read the numeric `chat_id` from `getUpdates` on `TELEGRAM_API_BASE`:
+
+   ```bash
+   curl -s "https://api.telegram.org/bot<token>/getUpdates"
+   ```
+
+   The id is negative for a group. Set it as `TELEGRAM_CHAT_ID`.
+
+The token and the chat id are required only for a real send. `--dry-run` needs
+neither, but `TELEGRAM_API_BASE` and `TELEGRAM_PROXY` are still validated.
+
+### Limits
+
+The Bot API accepts 50 MB per document and 1024 bytes per caption. Both are
+checked before the upload starts, so an oversized file is rejected, not sent.
+
+### Proxy
+
+`TELEGRAM_PROXY` accepts `socks5`, `socks5h`, `http`, and `https`. An empty
+value means a direct connection, even when `HTTPS_PROXY` is set.
+
+### Self-hosted Bot API
+
+`TELEGRAM_API_BASE` defaults to `https://api.telegram.org` and needs a change
+only for a self-hosted Bot API server or a test server. The value is trimmed,
+takes no `/bot…` suffix, and must be an `http` or `https` URL with a host.
+
+### Failures
+
+A 429, a 5xx response, or a transport error is retried, up to three attempts
+in total; a 429's `retry_after` replaces the default backoff, and any other
+4xx fails at once. The error is logged with the bot token redacted, the report
+stays on disk, and the run exits 1 so a scheduled job reports the failure.
 
 ## How the report is built
 
@@ -112,8 +172,9 @@ internal/config/       env file, environment parsing and validation
 internal/date/         Asia/Tehran ranges and GitLab date parameters
 internal/gitlab/       HTTP client, endpoints, types
 internal/report/       collection, normalization, Markdown
+internal/telegram/     Bot API client: upload, limits, retry
 internal/update/       GitHub release client and binary replacement
-internal/testutil/     fixture loader and fake GitLab server
+internal/testutil/     fixture loader, fake GitLab and Telegram servers
 testdata/              sanitized API fixtures
 .github/workflows/     ci and release
 .goreleaser.yaml       release targets, archives, checksums
@@ -224,5 +285,6 @@ go test ./internal/report -run TestRenderGolden -update
 - `Persistent=true` timers still default to "yesterday relative to now", so a
   laptop that was off for several days produces one report, not one per missed
   day.
-- Telegram delivery is not implemented yet; the SOCKS5 proxy must be reachable
-  when the scheduled run fires once it is.
+- Delivery has no persistence or deduplication. A retry after a timeout can
+  deliver the same file twice, and a run that fails leaves the report on disk
+  for a manual resend.

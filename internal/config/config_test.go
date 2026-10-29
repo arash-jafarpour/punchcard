@@ -24,6 +24,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ReportDir != DefaultReportDir {
 		t.Errorf("ReportDir = %q, want %q", cfg.ReportDir, DefaultReportDir)
 	}
+	if cfg.TelegramAPIBase != DefaultTelegramAPIBase {
+		t.Errorf("TelegramAPIBase = %q, want %q", cfg.TelegramAPIBase, DefaultTelegramAPIBase)
+	}
 	if !cfg.SendEmptyReport {
 		t.Error("SendEmptyReport = false, want true by default")
 	}
@@ -77,8 +80,60 @@ func TestValidateRejectsBadGitLabURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.Validate(true); err == nil {
-		t.Error("expected an error for a non-HTTP GitLab URL")
+	err = cfg.Validate(true)
+	if err == nil {
+		t.Fatal("expected an error for a non-HTTP GitLab URL")
+	}
+	want := `invalid GITLAB_URL "ftp://gitlab.example.test": want an http or https URL`
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestValidateTelegramAPIBase(t *testing.T) {
+	tests := []struct {
+		name    string
+		unset   bool
+		raw     string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset uses the default", unset: true, want: DefaultTelegramAPIBase},
+		{name: "empty uses the default", raw: "", want: DefaultTelegramAPIBase},
+		{name: "whitespace uses the default", raw: "  ", want: DefaultTelegramAPIBase},
+		{name: "https host", raw: "https://bot.example.test", want: "https://bot.example.test"},
+		{name: "loopback http", raw: "http://127.0.0.1:8080", want: "http://127.0.0.1:8080"},
+		{name: "trailing slash removed", raw: "https://api.telegram.org/", want: "https://api.telegram.org"},
+		{name: "multiple trailing slashes removed", raw: "https://api.telegram.org///", want: "https://api.telegram.org"},
+		{name: "ftp scheme rejected", raw: "ftp://api.telegram.org", wantErr: true},
+		{name: "missing host rejected", raw: "https://", wantErr: true},
+		{name: "not a url rejected", raw: "not-a-url", wantErr: true},
+		{name: "single slash rejected", raw: "/", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{"GITLAB_TOKEN": "token"}
+			if !tc.unset {
+				env["TELEGRAM_API_BASE"] = tc.raw
+			}
+			cfg, err := LoadFrom(envFrom(env), LoadOptions{})
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if !tc.wantErr && cfg.TelegramAPIBase != tc.want {
+				t.Errorf("TelegramAPIBase = %q, want %q", cfg.TelegramAPIBase, tc.want)
+			}
+			err = cfg.Validate(true)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "TELEGRAM_API_BASE") {
+					t.Fatalf("Validate(true) = %v, want a TELEGRAM_API_BASE error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate(true) = %v, want nil", err)
+			}
+		})
 	}
 }
 
