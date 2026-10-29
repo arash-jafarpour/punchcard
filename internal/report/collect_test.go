@@ -2,6 +2,7 @@ package report
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,74 @@ func TestCommitAccumPrefersPrecisePushTime(t *testing.T) {
 	acc.merge(commitResult{pushedAt: listing, precise: true})
 	if !acc.pushedAt.Equal(listing) {
 		t.Errorf("earliest precise time not kept: %s", acc.pushedAt)
+	}
+}
+
+func TestCollectWindow(t *testing.T) {
+	stub := fixtureStubForDay(t, testDay)
+	client := stub.Client(testToken, gitlab.WithSleep(func(time.Duration) {}))
+	days := []date.Range{testDayRange(t, "2026-10-26"), testDayRange(t, testDay)}
+	user := &gitlab.User{ID: 7, Username: "arash.jafarpour", Name: "Arash Jafarpour", Email: "arash@daal.ir"}
+
+	md, err := NewCollector(client, slog.New(slog.DiscardHandler)).
+		CollectWindow(context.Background(), days, user, Options{})
+	if err != nil {
+		t.Fatalf("collect window: %v", err)
+	}
+
+	if len(md.Days) != 2 || len(md.Ranges) != 2 {
+		t.Fatalf("window = %d days on %d ranges, want 2 and 2", len(md.Days), len(md.Ranges))
+	}
+	if got := md.Days[0].Date; got != "2026-10-26" {
+		t.Errorf("day[0] = %s, want 2026-10-26", got)
+	}
+	if got := md.Days[1].Date; got != testDay {
+		t.Errorf("day[1] = %s, want %s", got, testDay)
+	}
+	if got := md.Ranges[0].Date(); got != "2026-10-26" {
+		t.Errorf("range[0] = %s, want 2026-10-26", got)
+	}
+	if md.Days[0].Summary.HasActivity() {
+		t.Errorf("the day before the fixture has activity: %+v", md.Days[0].Summary)
+	}
+
+	wantSummary := Summary{
+		Projects:   3,
+		Pushes:     4,
+		Commits:    3,
+		Additions:  86,
+		Deletions:  45,
+		MRsMerged:  1,
+		MRsUpdated: 1,
+		Issues:     2,
+		Reviews:    3,
+	}
+	if md.Summary != wantSummary {
+		t.Errorf("merged summary = %+v, want %+v", md.Summary, wantSummary)
+	}
+	if md.Timezone != "Asia/Tehran" || md.User.Username != "arash.jafarpour" {
+		t.Errorf("window identity = %q / %+v", md.Timezone, md.User)
+	}
+	if got := md.Stem(); got != "2026-10-26_2026-10-27" {
+		t.Errorf("stem = %q", got)
+	}
+	if got := md.Label(); got != "2026-10-26 → 2026-10-27" {
+		t.Errorf("label = %q", got)
+	}
+	if got := len(md.Projects()); got != 3 {
+		t.Errorf("merged projects = %d, want 3 unique", got)
+	}
+	if !containsWarning(md.Warnings, "2026-10-27: push event 1004") {
+		t.Errorf("warnings are not tagged with their day: %v", md.Warnings)
+	}
+}
+
+func TestCollectWindowRejectsEmptyWindow(t *testing.T) {
+	client := fixtureStub(t).Client(testToken)
+	_, err := NewCollector(client, nil).CollectWindow(context.Background(), nil,
+		&gitlab.User{ID: 7, Username: "arash.jafarpour"}, Options{})
+	if err == nil {
+		t.Error("an empty window collected without an error")
 	}
 }
 

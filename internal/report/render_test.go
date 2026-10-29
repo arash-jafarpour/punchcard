@@ -38,6 +38,137 @@ func TestRenderGolden(t *testing.T) {
 	}
 }
 
+// portalReport is a small handcrafted active day after the fixture day, so the
+// multi-day golden covers two day sections and a merged glance.
+func portalReport(t *testing.T, loc *time.Location, user UserInfo) *Report {
+	t.Helper()
+	commit := Commit{
+		ShortID:      "abc12345",
+		SHA:          "abc12345abc12345abc12345abc12345abc12345",
+		Title:        "docs: refresh the onboarding guide",
+		WebURL:       "https://gitlab.daal.ir/delijan/web/portal/-/commit/abc12345abc12345abc12345abc12345abc12345",
+		PushedAt:     mustTime(t, "2026-10-28T10:15:00+03:30"),
+		Additions:    10,
+		Deletions:    2,
+		HasStats:     true,
+		AuthorIsUser: true,
+	}
+	return &Report{
+		Date:     "2026-10-28",
+		Timezone: "Asia/Tehran",
+		Location: loc,
+		User:     user,
+		Projects: []Project{{
+			ID:                99,
+			PathWithNamespace: "delijan/web/portal",
+			Name:              "portal",
+			WebURL:            "https://gitlab.daal.ir/delijan/web/portal",
+			Available:         true,
+			Pushes:            1,
+			Branches:          []string{"main"},
+			Commits:           []Commit{commit},
+		}},
+		Summary: Summary{Projects: 1, Pushes: 1, Commits: 1, Additions: 10, Deletions: 2},
+	}
+}
+
+func TestRenderMultiDayGolden(t *testing.T) {
+	loc := testLocation(t)
+	rep := fixtureReport(t)
+	empty := &Report{Date: "2026-10-26", Timezone: "Asia/Tehran", Location: loc, User: rep.User}
+	next := portalReport(t, loc, rep.User)
+
+	ranges := []date.Range{
+		testDayRange(t, "2026-10-26"),
+		testDayRange(t, "2026-10-27"),
+		testDayRange(t, "2026-10-28"),
+	}
+	got := RenderMultiDay(NewMultiDay(ranges, []*Report{empty, rep, next}))
+
+	path := filepath.Join("testdata", "golden", "2026-10-26_2026-10-28.md")
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create golden dir: %v", err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		return
+	}
+
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden (regenerate with: go test ./internal/report -run TestRenderMultiDayGolden -update): %v", err)
+	}
+	if string(want) != string(got) {
+		t.Errorf("rendered window does not match %s\n--- want ---\n%s\n--- got ---\n%s", path, want, got)
+	}
+}
+
+func TestRenderMultiDayNoActivity(t *testing.T) {
+	loc := testLocation(t)
+	user := UserInfo{Name: "Arash Jafarpour", Username: "arash.jafarpour"}
+	days := []*Report{
+		{Date: "2026-10-26", Timezone: "Asia/Tehran", Location: loc, User: user},
+		{Date: "2026-10-27", Timezone: "Asia/Tehran", Location: loc, User: user},
+	}
+	md := NewMultiDay([]date.Range{
+		testDayRange(t, "2026-10-26"),
+		testDayRange(t, "2026-10-27"),
+	}, days)
+
+	want := "# Activity report — 2026-10-26 → 2026-10-27\n\n" +
+		"**Arash Jafarpour** (@arash.jafarpour) · Asia/Tehran\n\n" +
+		"## No activity\n\n" +
+		"_No activity recorded from 2026-10-26 to 2026-10-27._\n"
+
+	if got := string(RenderMultiDay(md)); got != want {
+		t.Errorf("no-activity window mismatch\n--- want ---\n%s\n--- got ---\n%s", want, got)
+	}
+}
+
+func TestWriteMultiDayFile(t *testing.T) {
+	loc := testLocation(t)
+	rep := fixtureReport(t)
+	empty := &Report{Date: "2026-10-26", Timezone: "Asia/Tehran", Location: loc, User: rep.User}
+	md := NewMultiDay([]date.Range{
+		testDayRange(t, "2026-10-26"),
+		testDayRange(t, testDay),
+	}, []*Report{empty, rep})
+
+	dir := t.TempDir()
+	path, err := WriteMultiDayFile(dir, md)
+	if err != nil {
+		t.Fatalf("write multi-day file: %v", err)
+	}
+	if want := filepath.Join(dir, "2026-10-26_2026-10-27.md"); path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	body := string(data)
+	if !strings.HasPrefix(body, "# Activity report — 2026-10-26 → 2026-10-27\n") {
+		t.Errorf("file lacks the window title:\n%s", body)
+	}
+	if !strings.Contains(body, "## 2026-10-27\n") {
+		t.Errorf("file lacks the active day section:\n%s", body)
+	}
+	if strings.Contains(body, "## 2026-10-26\n") {
+		t.Errorf("file renders the empty day:\n%s", body)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("file mode = %o, want 600", perm)
+	}
+}
+
 func TestRenderNoActivity(t *testing.T) {
 	loc, err := date.ParseTimezone("Asia/Tehran")
 	if err != nil {

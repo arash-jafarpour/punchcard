@@ -24,11 +24,53 @@ func Render(rep *Report) []byte {
 	}
 
 	writeSummary(&b, rep.Summary)
-	writeGlance(&b, rep)
+	writeGlance(&b, rep.Projects)
 	for _, project := range rep.Projects {
-		writeProject(&b, rep, project)
+		writeProject(&b, rep, project, 2)
 	}
 	return finish(&b)
+}
+
+// RenderMultiDay renders the combined document for a window: the aggregate
+// summary once, then one section per day that has activity. Days without
+// activity are left out, and project headings drop one level so they sit
+// under the day heading.
+func RenderMultiDay(md *MultiDay) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "# Activity report — %s\n\n", md.Label())
+	writeIdentity(&b, &Report{User: md.User, Timezone: md.Timezone})
+
+	if !md.Summary.HasActivity() {
+		b.WriteString("## No activity\n\n")
+		b.WriteString(noActivityLine(md))
+		return finish(&b)
+	}
+
+	writeSummary(&b, md.Summary)
+	writeGlance(&b, md.Projects())
+	for _, day := range md.Days {
+		if !day.Summary.HasActivity() {
+			continue
+		}
+		fmt.Fprintf(&b, "## %s\n\n", day.Date)
+		for _, project := range day.Projects {
+			writeProject(&b, day, project, 3)
+		}
+	}
+	return finish(&b)
+}
+
+// noActivityLine says which window produced nothing.
+func noActivityLine(md *MultiDay) string {
+	switch len(md.Days) {
+	case 0:
+		return "_No activity recorded._\n"
+	case 1:
+		return fmt.Sprintf("_No activity recorded for %s._\n", md.Days[0].Date)
+	default:
+		return fmt.Sprintf("_No activity recorded from %s to %s._\n",
+			md.Days[0].Date, md.Days[len(md.Days)-1].Date)
+	}
 }
 
 // finish trims trailing blank lines so every report ends with exactly one
@@ -42,14 +84,24 @@ func finish(b *bytes.Buffer) []byte {
 // WriteFile renders the report and writes reports/YYYY-MM-DD.md. The file is
 // mode 0600 because commit messages and MR titles are internal data.
 func WriteFile(dir string, rep *Report) (string, error) {
+	return writeReportFile(dir, rep.Date, Render(rep))
+}
+
+// WriteMultiDayFile renders the combined window and writes <stem>.md, where
+// the stem is YYYY-MM-DD for one day and YYYY-MM-DD_YYYY-MM-DD for a range.
+func WriteMultiDayFile(dir string, md *MultiDay) (string, error) {
+	return writeReportFile(dir, md.Stem(), RenderMultiDay(md))
+}
+
+func writeReportFile(dir, stem string, data []byte) (string, error) {
 	if dir == "" {
 		dir = "./reports"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create report directory %s: %w", dir, err)
 	}
-	path := filepath.Join(dir, rep.Date+".md")
-	if err := os.WriteFile(path, Render(rep), 0o600); err != nil {
+	path := filepath.Join(dir, stem+".md")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return "", fmt.Errorf("write report %s: %w", path, err)
 	}
 	return path, nil
@@ -101,12 +153,12 @@ func writeSummary(b *bytes.Buffer, s Summary) {
 	b.WriteString("\n")
 }
 
-func writeGlance(b *bytes.Buffer, rep *Report) {
-	if len(rep.Projects) == 0 {
+func writeGlance(b *bytes.Buffer, projects []Project) {
+	if len(projects) == 0 {
 		return
 	}
 	b.WriteString("### Projects at a glance\n\n")
-	for _, project := range rep.Projects {
+	for _, project := range projects {
 		fmt.Fprintf(b, "- **%s** — %s\n", project.PathWithNamespace, glanceLine(project))
 	}
 	b.WriteString("\n")
@@ -160,8 +212,17 @@ func glanceLine(project Project) string {
 	return joinPhrases(parts)
 }
 
-func writeProject(b *bytes.Buffer, rep *Report, project Project) {
-	fmt.Fprintf(b, "## %s\n\n", project.PathWithNamespace)
+// writeHeading writes a Markdown heading at level. Level 2 is a top-level
+// section of a daily report; level 3 is a project inside a day section.
+func writeHeading(b *bytes.Buffer, level int, text string) {
+	b.WriteString(strings.Repeat("#", level))
+	b.WriteString(" ")
+	b.WriteString(text)
+	b.WriteString("\n\n")
+}
+
+func writeProject(b *bytes.Buffer, rep *Report, project Project, level int) {
+	writeHeading(b, level, project.PathWithNamespace)
 	if project.WebURL != "" {
 		fmt.Fprintf(b, "%s\n\n", project.WebURL)
 	}
@@ -177,21 +238,21 @@ func writeProject(b *bytes.Buffer, rep *Report, project Project) {
 	}
 
 	if len(project.Commits) > 0 {
-		writeCommits(b, rep, project.Commits)
+		writeCommits(b, rep, project.Commits, level+1)
 	}
 	if len(project.MergeRequests) > 0 {
-		writeMergeRequests(b, project.MergeRequests)
+		writeMergeRequests(b, project.MergeRequests, level+1)
 	}
 	if len(project.Reviews) > 0 {
-		writeReviews(b, project.Reviews)
+		writeReviews(b, project.Reviews, level+1)
 	}
 	if len(project.Issues) > 0 {
-		writeIssues(b, rep, project.Issues)
+		writeIssues(b, rep, project.Issues, level+1)
 	}
 }
 
-func writeCommits(b *bytes.Buffer, rep *Report, commits []Commit) {
-	b.WriteString("### Commits\n\n")
+func writeCommits(b *bytes.Buffer, rep *Report, commits []Commit, level int) {
+	writeHeading(b, level, "Commits")
 	for _, commit := range commits {
 		sha := "`" + commit.ShortID + "`"
 		if commit.WebURL != "" {
@@ -209,8 +270,8 @@ func writeCommits(b *bytes.Buffer, rep *Report, commits []Commit) {
 	b.WriteString("\n")
 }
 
-func writeMergeRequests(b *bytes.Buffer, mrs []MergeRequest) {
-	b.WriteString("### Merge requests\n\n")
+func writeMergeRequests(b *bytes.Buffer, mrs []MergeRequest, level int) {
+	writeHeading(b, level, "Merge requests")
 	for _, mr := range mrs {
 		line := "- " + itemRef(mr.IID, mr.WebURL)
 		if title := cleanInline(mr.Title, 120); title != "" {
@@ -225,8 +286,8 @@ func writeMergeRequests(b *bytes.Buffer, mrs []MergeRequest) {
 	b.WriteString("\n")
 }
 
-func writeReviews(b *bytes.Buffer, reviews []Review) {
-	b.WriteString("### Reviews\n\n")
+func writeReviews(b *bytes.Buffer, reviews []Review, level int) {
+	writeHeading(b, level, "Reviews")
 	for _, review := range reviews {
 		line := "- Reviewed " + itemRef(review.IID, review.WebURL)
 		if title := cleanInline(review.Title, 120); title != "" {
@@ -246,8 +307,8 @@ func writeReviews(b *bytes.Buffer, reviews []Review) {
 	b.WriteString("\n")
 }
 
-func writeIssues(b *bytes.Buffer, rep *Report, issues []Issue) {
-	b.WriteString("### Issues\n\n")
+func writeIssues(b *bytes.Buffer, rep *Report, issues []Issue, level int) {
+	writeHeading(b, level, "Issues")
 	for _, issue := range issues {
 		ref := itemRef(issue.IID, issue.WebURL)
 		title := cleanInline(issue.Title, 120)

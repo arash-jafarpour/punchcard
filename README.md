@@ -1,12 +1,14 @@
 # punchcard
 
-Generates a deterministic English Markdown report of yesterday's GitLab
-activity for one user and sends it to Telegram as a document.
+Generates a deterministic English Markdown report of GitLab activity for one
+user — one day, or the last N days — and sends it to Telegram as a document.
 
 - Instance: `https://gitlab.daal.ir`
-- Report day: yesterday in `Asia/Tehran` by default
+- Report day: yesterday in `Asia/Tehran` by default; `--date` picks one day,
+  `--days N` picks a window ending today
 - Data: commits/pushes, merge requests, reviews, issues and issue comments
-- Output: `reports/YYYY-MM-DD.md`, mode `0600`
+- Output: `reports/YYYY-MM-DD.md`, or `reports/YYYY-MM-DD_YYYY-MM-DD.md` for a
+  window, mode `0600`
 
 ## Status
 
@@ -14,6 +16,8 @@ Working:
 
 - `--dry-run`: collects the day from GitLab, renders `reports/YYYY-MM-DD.md`,
   applies the exit codes and logs to stderr via `slog`
+- `--days N`: one combined report for the last N days ending today, with one
+  section per day that has activity and one aggregate summary
 - configuration, `Asia/Tehran` date math, GitLab client, collection,
   deduplication and the Markdown renderer
 - `punchcard update`: replaces the binary with the latest GitHub release
@@ -79,12 +83,37 @@ expand `$VAR` and it does not run commands.
 | `SEND_EMPTY_REPORT` | no | `true` | send a no-activity heartbeat |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 
-Flags: `-d/--date YYYY-MM-DD`, `--env-file PATH`, `--dry-run`,
+Flags: `-d/--date YYYY-MM-DD`, `--days N`, `--env-file PATH`, `--dry-run`,
 `--report-dir PATH`, `-v/--verbose`, `-V/--version`, `-h/--help`.
 Keep the long forms in scripts and systemd units.
 
 Commands: `update` (see below), `completion SHELL`, `help`. A bare `punchcard`
 runs the report.
+
+## Report window
+
+A run reports exactly one window:
+
+| Flags | Window | File |
+|---|---|---|
+| none | yesterday, whole day | `YYYY-MM-DD.md` |
+| `--date YYYY-MM-DD` | that day, whole day | `YYYY-MM-DD.md` |
+| `--days N` | the last N days ending today | `YYYY-MM-DD_YYYY-MM-DD.md` (`YYYY-MM-DD.md` for `N=1`) |
+
+`--date` and `--days` cannot be combined, and a combination exits 1. `N` must
+be between 1 and 90; `--days 0`, `--days 91` and negative values exit 1 before
+any network call.
+
+The window ends at the moment of the run, so the current day is partial: a
+07:00 run with `--days 2` reports all of yesterday and today up to 07:00. A
+`--days 1` run is the ordinary daily report for today, with the usual
+`# Daily report` title and `YYYY-MM-DD.md` name.
+
+A window report shows the aggregate `Summary` and `Projects at a glance` once,
+then one `## YYYY-MM-DD` section for every day with activity. Days without
+activity are left out and project headings drop one level. The project count
+is the number of unique projects in the window, not the sum of the daily
+counts; pushes, commits, lines, merge requests, issues and reviews are summed.
 
 ## Telegram delivery
 
@@ -93,17 +122,21 @@ chat, unless the run is a dry run.
 
 ### What is sent
 
-The `.md` as a document named `YYYY-MM-DD.md` with `text/markdown`, plus one
-plain-text caption and no `parse_mode`:
+The `.md` as a document named `YYYY-MM-DD.md`, or `YYYY-MM-DD_YYYY-MM-DD.md`
+for a window, with `text/markdown`, plus one plain-text caption and no
+`parse_mode`:
 
 ```text
 GitLab daily report 2026-10-27 · 3 projects · 12 commits · +240/−80
+GitLab report 2026-10-21 → 2026-10-27 · 5 projects · 28 commits · +640/−210
 ```
 
 Zero-count parts are left out. A day without activity sends
-`GitLab daily report <date> · no activity`, so `SEND_EMPTY_REPORT=true` still
-produces a heartbeat. `--dry-run` and `SEND_EMPTY_REPORT=false` write the file
-and skip the upload.
+`GitLab daily report <date> · no activity`, and a window without activity
+sends `GitLab report <start> → <end> · no activity`, so
+`SEND_EMPTY_REPORT=true` still produces a heartbeat. A window is always one
+document and one caption, never one message per day. `--dry-run` and
+`SEND_EMPTY_REPORT=false` write the file and skip the upload.
 
 ### Create the bot and find the chat
 
@@ -160,6 +193,11 @@ stays on disk, and the run exits 1 so a scheduled job reports the failure.
    as `project #<id>` without links.
 7. The renderer sorts projects by path, commits by push time, and omits empty
    sections. A day without activity renders a short `No activity` report.
+
+A window (`--days N`) repeats steps 2–6 once per day, oldest first, then
+merges the per-day summaries into one report. Each day is queried with its own
+window, so a day's merge request, review and issue counts never leak into a
+neighbouring day.
 
 The summary is computed from the same model that feeds the sections, so the
 counts and the body can never drift apart.
@@ -284,7 +322,11 @@ go test ./internal/report -run TestRenderGolden -update
   commit wins.
 - `Persistent=true` timers still default to "yesterday relative to now", so a
   laptop that was off for several days produces one report, not one per missed
-  day.
+  day. Use `--days N` for a catch-up window; it is capped at 90 days.
+- A window costs one full collection per day, so a long `--days` run makes
+  proportionally more GitLab requests and can hit the instance's rate limit.
+- The window includes the current day up to the run time, thus a timer that
+  runs early in the day reports a mostly empty today.
 - Delivery has no persistence or deduplication. A retry after a timeout can
   deliver the same file twice, and a run that fails leaves the report on disk
   for a manual resend.

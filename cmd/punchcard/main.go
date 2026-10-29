@@ -43,11 +43,19 @@ var errRunFailed = errors.New("run failed")
 // options holds the command-line flags.
 type options struct {
 	date      string
+	days      int
 	envFile   string
 	dryRun    bool
 	reportDir string
 	verbose   bool
 }
+
+// Window bounds for --days. The cap keeps one run's API usage, report size and
+// upload predictable.
+const (
+	minDays = 1
+	maxDays = 90
+)
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -96,13 +104,15 @@ func newRootCommand(started *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "punchcard",
 		Short: "Generate the GitLab daily report",
-		Long: "Generate a Markdown report of one user's GitLab activity for one day.\n" +
+		Long: "Generate a Markdown report of one user's GitLab activity for one day\n" +
+			"or for a window of recent days.\n" +
 			"The Markdown file is sent to TELEGRAM_CHAT_ID as a document with a short\n" +
 			"caption unless --dry-run is set.\n\n" +
 			"Precedence: flags, then the process environment, then the env file.\n" +
 			"The env file holds KEY=VALUE lines and defaults to\n" +
 			"$XDG_CONFIG_HOME/punchcard/env.",
 		Example: "  punchcard --date 2026-10-27 --dry-run\n" +
+			"  punchcard --days 7 --dry-run\n" +
 			"  punchcard --env-file ./env --verbose",
 		Version:       versionString(),
 		Args:          cobra.NoArgs,
@@ -123,6 +133,7 @@ func newRootCommand(started *bool) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.date, "date", "d", "", "report date as YYYY-MM-DD (default: yesterday in the report timezone)")
+	flags.IntVar(&opts.days, "days", 0, "report the last N days ending today (1-90); cannot be combined with --date")
 	flags.StringVar(&opts.envFile, "env-file", "", "read KEY=VALUE lines from this file (default: $XDG_CONFIG_HOME/punchcard/env)")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "write the Markdown file but do not contact Telegram")
 	flags.StringVar(&opts.reportDir, "report-dir", "", "output directory (default: ./reports or REPORT_DIR)")
@@ -151,14 +162,9 @@ func prepare(cmd *cobra.Command, opts options) error {
 		return err
 	}
 
-	var rng date.Range
-	if opts.date != "" {
-		rng, err = date.ParseDay(opts.date, cfg.Location)
-		if err != nil {
-			return err
-		}
-	} else {
-		rng = date.Yesterday(time.Now(), cfg.Location)
+	days, err := resolveDays(cmd, opts, cfg.Location)
+	if err != nil {
+		return err
 	}
 
 	stderr := cmd.ErrOrStderr()
@@ -173,16 +179,51 @@ func prepare(cmd *cobra.Command, opts options) error {
 	ctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 
-	if code := runReport(ctx, cfg, rng, opts.dryRun, logger); code != 0 {
+	if code := runReport(ctx, cfg, days, opts.dryRun, logger); code != 0 {
 		return errRunFailed
 	}
 	return nil
 }
 
-// runReport collects the day's activity, writes the Markdown file and uploads
-// it to Telegram. The file is always written before any send so a delivery
-// failure never loses the data.
-func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bool, logger *slog.Logger) int {
+// resolveDays turns the flags into the ordered day window of the run. A bare
+// run reports yesterday, --date reports one named day, and --days reports the
+// last N days ending today. The window is the single definition that the
+// collector, the file name and the caption share.
+func resolveDays(cmd *cobra.Command, opts options, loc *time.Location) ([]date.Range, error) {
+	daysSet := cmd.Flags().Changed("days")
+	switch {
+	case opts.date != "" && daysSet:
+		return nil, errors.New("--date and --days cannot be combined")
+	case daysSet && (opts.days < minDays || opts.days > maxDays):
+		return nil, fmt.Errorf("--days must be between %d and %d, got %d",
+			minDays, maxDays, opts.days)
+	case daysSet:
+		return date.LastDays(time.Now(), loc, opts.days), nil
+	case opts.date != "":
+		rng, err := date.ParseDay(opts.date, loc)
+		if err != nil {
+			return nil, err
+		}
+		return []date.Range{rng}, nil
+	default:
+		return []date.Range{date.Yesterday(time.Now(), loc)}, nil
+	}
+}
+
+// generated is the artifact of one run: the file on disk plus the numbers the
+// log and the Telegram caption report.
+type generated struct {
+	stem    string
+	label   string
+	path    string
+	summary report.Summary
+	caption string
+}
+
+// runReport collects the window's activity, writes one Markdown file and
+// uploads it to Telegram. The file is always written before any send so a
+// delivery failure never loses the data.
+func runReport(ctx context.Context, cfg config.Config, days []date.Range, dryRun bool, logger *slog.Logger) int {
 	client, err := gitlab.New(cfg.GitLabURL, cfg.GitLabToken)
 	if err != nil {
 		logger.Error("gitlab client", "error", err)
@@ -200,42 +241,44 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 	}
 
 	collector := report.NewCollector(client, logger)
-	rep, err := collector.Collect(ctx, rng, user, report.Options{AuthorEmails: cfg.AuthorEmails})
-	if err != nil {
-		logger.Error("collection failed", "date", rng.Date(), "error", err)
-		return 1
-	}
+	opts := report.Options{AuthorEmails: cfg.AuthorEmails}
 
-	path, err := report.WriteFile(cfg.ReportDir, rep)
+	file, err := generate(ctx, cfg.ReportDir, collector, days, user, opts)
 	if err != nil {
-		logger.Error("write report", "error", err)
+		logger.Error("report generation failed",
+			"window", date.WindowLabel(days),
+			"error", err,
+		)
 		return 1
 	}
 	// Log the absolute path: the file is often written under a relative
 	// REPORT_DIR, and "reports/…" alone does not say where that is.
-	displayPath := path
-	if abs, absErr := filepath.Abs(path); absErr == nil {
+	displayPath := file.path
+	if abs, absErr := filepath.Abs(file.path); absErr == nil {
 		displayPath = abs
 	}
 
 	logger.Info("report generated",
-		"date", rep.Date,
+		"date", file.stem,
+		"window", file.label,
+		"days", len(days),
 		"path", displayPath,
-		"projects", rep.Summary.Projects,
-		"pushes", rep.Summary.Pushes,
-		"commits", rep.Summary.Commits,
-		"lines", rep.Summary.Lines(),
-		"mrs", mrTotal(rep.Summary),
-		"issues", rep.Summary.Issues,
-		"reviews", rep.Summary.Reviews,
+		"projects", file.summary.Projects,
+		"pushes", file.summary.Pushes,
+		"commits", file.summary.Commits,
+		"lines", file.summary.Lines(),
+		"mrs", mrTotal(file.summary),
+		"issues", file.summary.Issues,
+		"reviews", file.summary.Reviews,
 	)
 
 	if dryRun {
 		logger.Info("dry run: telegram skipped", "path", displayPath)
 		return 0
 	}
-	if !rep.Summary.HasActivity() && !cfg.SendEmptyReport {
-		logger.Info("no activity and SEND_EMPTY_REPORT=false: telegram skipped", "date", rep.Date)
+	if !file.summary.HasActivity() && !cfg.SendEmptyReport {
+		logger.Info("no activity and SEND_EMPTY_REPORT=false: telegram skipped",
+			"date", file.stem, "window", file.label)
 		return 0
 	}
 
@@ -250,13 +293,14 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 
 	// Upload the file under the same absolute path the logs name, so a
 	// relative REPORT_DIR cannot desynchronise the two.
-	res, err := tg.SendDocument(ctx, cfg.TelegramChatID, displayPath, caption(*rep))
+	res, err := tg.SendDocument(ctx, cfg.TelegramChatID, displayPath, file.caption)
 	if err != nil {
 		// The error is logged as returned: the client already redacts the
 		// token, and extra formatting could reintroduce it. The report file
 		// stays on disk.
 		logger.Error("telegram delivery failed",
-			"date", rep.Date,
+			"date", file.stem,
+			"window", file.label,
 			"path", displayPath,
 			"error", err,
 		)
@@ -264,7 +308,8 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 	}
 
 	logger.Info("telegram delivered",
-		"date", rep.Date,
+		"date", file.stem,
+		"window", file.label,
 		"chat_id", cfg.TelegramChatID,
 		"message_id", res.MessageID,
 		"path", displayPath,
@@ -272,18 +317,67 @@ func runReport(ctx context.Context, cfg config.Config, rng date.Range, dryRun bo
 	return 0
 }
 
+// generate collects the window and writes its Markdown file. A one-day window
+// keeps the daily document and its file name; a longer window writes the
+// combined range report.
+func generate(ctx context.Context, reportDir string, collector *report.Collector, days []date.Range, user *gitlab.User, opts report.Options) (generated, error) {
+	if len(days) == 1 {
+		rep, err := collector.Collect(ctx, days[0], user, opts)
+		if err != nil {
+			return generated{}, err
+		}
+		path, err := report.WriteFile(reportDir, rep)
+		if err != nil {
+			return generated{}, err
+		}
+		return generated{
+			stem:    rep.Date,
+			label:   rep.Date,
+			path:    path,
+			summary: rep.Summary,
+			caption: caption(*rep),
+		}, nil
+	}
+
+	md, err := collector.CollectWindow(ctx, days, user, opts)
+	if err != nil {
+		return generated{}, err
+	}
+	path, err := report.WriteMultiDayFile(reportDir, md)
+	if err != nil {
+		return generated{}, err
+	}
+	return generated{
+		stem:    md.Stem(),
+		label:   md.Label(),
+		path:    path,
+		summary: md.Summary,
+		caption: windowCaption(md),
+	}, nil
+}
+
 func mrTotal(s report.Summary) int {
 	return s.MRsOpened + s.MRsMerged + s.MRsClosed + s.MRsUpdated
 }
 
-// caption is the short plain-text line that rides with the uploaded report.
-// Zero-count parts are omitted, and a day without activity says so instead of
-// listing zeros.
+// caption is the short plain-text line that rides with the uploaded daily
+// report.
 func caption(rep report.Report) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "GitLab daily report %s", rep.Date)
+	return captionFor("GitLab daily report "+rep.Date, rep.Summary)
+}
 
-	s := rep.Summary
+// windowCaption is the caption for a combined window: one caption for the
+// whole range, never one per day.
+func windowCaption(md *report.MultiDay) string {
+	return captionFor("GitLab report "+md.Label(), md.Summary)
+}
+
+// captionFor formats the shared caption tail. Zero-count parts are omitted,
+// and a report without activity says so instead of listing zeros.
+func captionFor(prefix string, s report.Summary) string {
+	var b strings.Builder
+	b.WriteString(prefix)
+
 	if !s.HasActivity() {
 		b.WriteString(" · no activity")
 		return b.String()

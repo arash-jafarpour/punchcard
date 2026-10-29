@@ -2,13 +2,16 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/arash-jafarpour/punchcard/internal/date"
 	"github.com/arash-jafarpour/punchcard/internal/report"
 	"github.com/arash-jafarpour/punchcard/internal/testutil"
 )
@@ -259,6 +262,245 @@ func TestEmptyDaySkipsTelegramWhenDisabled(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "2026-10-27.md")); err != nil {
 		t.Errorf("report not written: %v", err)
+	}
+}
+
+// rangeFile returns the single Markdown report in dir with its start and end
+// dates parsed from the file name. A one-day report has one date.
+func rangeFile(t *testing.T, dir string) (path, start, end string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("report files = %v, want exactly one", matches)
+	}
+	stem := strings.TrimSuffix(filepath.Base(matches[0]), ".md")
+	parts := strings.Split(stem, "_")
+	if len(parts) > 2 {
+		t.Fatalf("report file %q is neither YYYY-MM-DD nor YYYY-MM-DD_YYYY-MM-DD", stem)
+	}
+	for _, part := range parts {
+		if _, err := time.Parse(date.Layout, part); err != nil {
+			t.Fatalf("report file %q has a bad date %q: %v", stem, part, err)
+		}
+	}
+	return matches[0], parts[0], parts[len(parts)-1]
+}
+
+func TestDaysFlagWritesRangeReport(t *testing.T) {
+	stub := newEmptyStub(t)
+	dir := t.TempDir()
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	code, stdout, stderr := execute(t, "--days", "3", "--dry-run", "--report-dir", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty (logs go to stderr)", stdout)
+	}
+	if !strings.Contains(stderr, "days=3") {
+		t.Errorf("log lacks the window size: %q", stderr)
+	}
+	if !strings.Contains(stderr, `msg="dry run: telegram skipped"`) {
+		t.Errorf("stderr lacks the dry-run log: %q", stderr)
+	}
+
+	path, start, end := rangeFile(t, dir)
+	if start == end {
+		t.Fatalf("--days 3 wrote a single-day file %q", path)
+	}
+	startDay, err := time.Parse(date.Layout, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endDay, err := time.Parse(date.Layout, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := int(endDay.Sub(startDay).Hours() / 24); got != 2 {
+		t.Errorf("window spans %d days after the start, want 2", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	wantTitle := fmt.Sprintf("# Activity report — %s → %s\n", start, end)
+	if !strings.HasPrefix(string(data), wantTitle) {
+		t.Errorf("report title = %q, want the window label %q",
+			strings.SplitN(string(data), "\n", 2)[0], wantTitle)
+	}
+	if !strings.Contains(string(data), "## No activity") {
+		t.Errorf("report lacks the no-activity section:\n%s", data)
+	}
+	if !strings.Contains(stderr, `window="`+start+" → "+end+`"`) {
+		t.Errorf("log lacks the window label: %q", stderr)
+	}
+}
+
+func TestDaysOneKeepsSingleDayFileName(t *testing.T) {
+	stub := newEmptyStub(t)
+	dir := t.TempDir()
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	code, _, stderr := execute(t, "--days", "1", "--dry-run", "--report-dir", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+
+	path, start, end := rangeFile(t, dir)
+	if start != end {
+		t.Errorf("--days 1 wrote the range %q", filepath.Base(path))
+	}
+	if want := start + ".md"; filepath.Base(path) != want {
+		t.Errorf("file = %q, want %q", filepath.Base(path), want)
+	}
+
+	// One day is still the ordinary daily document, not a window.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if want := "# Daily report — " + start + "\n"; !strings.HasPrefix(string(data), want) {
+		t.Errorf("report does not start with %q:\n%s", want, data)
+	}
+}
+
+func TestDaysFlagDeliversRangeDocument(t *testing.T) {
+	gitlab := newEmptyStub(t)
+	tg := testutil.NewTelegramStub(t)
+	tg.Succeed(7777)
+
+	dir := t.TempDir()
+	baseEnv(t, map[string]string{
+		"GITLAB_URL":         gitlab.URL(),
+		"TELEGRAM_API_BASE":  tg.URL(),
+		"TELEGRAM_BOT_TOKEN": "bot-token",
+		"TELEGRAM_CHAT_ID":   "123456",
+	})
+
+	code, _, stderr := execute(t, "--days", "2", "--report-dir", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stderr, `msg="telegram delivered"`) {
+		t.Errorf("stderr lacks the delivered log: %q", stderr)
+	}
+
+	path, start, end := rangeFile(t, dir)
+	requests := tg.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("telegram requests = %d, want 1", len(requests))
+	}
+	req := requests[0]
+	if req.Err != nil {
+		t.Fatalf("stub could not read the request: %v", req.Err)
+	}
+	if req.Method != "sendDocument" {
+		t.Errorf("Bot API method = %q, want sendDocument", req.Method)
+	}
+	if want := filepath.Base(path); req.DocumentName != want {
+		t.Errorf("document filename = %q, want %q", req.DocumentName, want)
+	}
+	wantCaption := fmt.Sprintf("GitLab report %s → %s · no activity", start, end)
+	if req.Caption != wantCaption {
+		t.Errorf("caption = %q, want %q", req.Caption, wantCaption)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if !bytes.Equal(req.Document, data) {
+		t.Errorf("uploaded document differs from the file on disk (%d vs %d bytes)",
+			len(req.Document), len(data))
+	}
+}
+
+func TestDaysFlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "zero days",
+			args: []string{"--days", "0"},
+			want: "--days must be between 1 and 90",
+		},
+		{
+			name: "too many days",
+			args: []string{"--days", "91"},
+			want: "--days must be between 1 and 90",
+		},
+		{
+			name: "negative days",
+			args: []string{"--days", "-1"},
+			want: "--days must be between 1 and 90",
+		},
+		{
+			name: "date and days",
+			args: []string{"--date", "2026-10-27", "--days", "2"},
+			want: "--date and --days cannot be combined",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseEnv(t, nil)
+			args := append(append([]string(nil), tt.args...), "--dry-run")
+			code, _, stderr := execute(t, args...)
+			if code != 1 {
+				t.Errorf("exit code = %d, want 1 (stderr %q)", code, stderr)
+			}
+			if !strings.Contains(stderr, tt.want) {
+				t.Errorf("stderr = %q, want %q", stderr, tt.want)
+			}
+			if strings.Contains(stderr, "Usage:") {
+				t.Errorf("a validation failure printed the usage text: %q", stderr)
+			}
+		})
+	}
+}
+
+func TestWindowCaption(t *testing.T) {
+	loc, err := date.ParseTimezone(date.DefaultTimezone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, err := time.Parse(time.RFC3339, "2026-10-29T15:00:00+03:30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	days := date.LastDays(now, loc, 3)
+
+	// Projects are counted once across the window, not once per day.
+	first := &report.Report{
+		Date: "2026-10-27",
+		Projects: []report.Project{
+			{ID: 1, PathWithNamespace: "delijan/web/a"},
+			{ID: 2, PathWithNamespace: "delijan/web/b"},
+		},
+		Summary: report.Summary{Projects: 2, Commits: 3, Additions: 5, Deletions: 1},
+	}
+	last := &report.Report{
+		Date:     "2026-10-29",
+		Projects: []report.Project{{ID: 1, PathWithNamespace: "delijan/web/a"}},
+		Summary:  report.Summary{Projects: 1, Commits: 1, Additions: 1},
+	}
+	md := report.NewMultiDay(days, []*report.Report{first, last})
+
+	want := "GitLab report 2026-10-27 → 2026-10-29 · 2 projects · 4 commits · +6/\u22121"
+	if got := windowCaption(md); got != want {
+		t.Errorf("windowCaption() = %q, want %q", got, want)
+	}
+
+	empty := report.NewMultiDay(days, nil)
+	if got, want := windowCaption(empty), "GitLab report 2026-10-27 → 2026-10-29 · no activity"; got != want {
+		t.Errorf("empty windowCaption() = %q, want %q", got, want)
 	}
 }
 

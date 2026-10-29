@@ -62,6 +62,64 @@ func Yesterday(now time.Time, loc *time.Location) Range {
 	return NewRange(loc, now.In(loc).AddDate(0, 0, -1))
 }
 
+// LastDays returns n consecutive day windows ending on the day that contains
+// now, in loc. The windows are ordered oldest first. Every window starts at
+// local midnight; the window for today ends at now, so a run never claims
+// activity that has not happened yet.
+func LastDays(now time.Time, loc *time.Location, n int) []Range {
+	if n <= 0 {
+		return nil
+	}
+	local := now.In(loc)
+	today := NewRange(loc, local)
+	days := make([]Range, 0, n)
+	for i := n - 1; i >= 0; i-- {
+		start := today.Start.AddDate(0, 0, -i)
+		days = append(days, Range{
+			Location: loc,
+			Timezone: loc.String(),
+			Start:    start,
+			End:      start.AddDate(0, 0, 1),
+		})
+	}
+	days[len(days)-1].End = local
+	return days
+}
+
+// WindowEnd is the last, inclusive day of an ordered window as YYYY-MM-DD.
+func WindowEnd(days []Range) string {
+	if len(days) == 0 {
+		return ""
+	}
+	return days[len(days)-1].Date()
+}
+
+// WindowStem names the report file of an ordered window: YYYY-MM-DD for one
+// day and YYYY-MM-DD_YYYY-MM-DD for a range.
+func WindowStem(days []Range) string {
+	switch len(days) {
+	case 0:
+		return ""
+	case 1:
+		return days[0].Date()
+	default:
+		return days[0].Date() + "_" + WindowEnd(days)
+	}
+}
+
+// WindowLabel is the human-readable inclusive window: "2026-10-27" for one
+// day and "2026-10-21 → 2026-10-27" for a range.
+func WindowLabel(days []Range) string {
+	switch len(days) {
+	case 0:
+		return ""
+	case 1:
+		return days[0].Date()
+	default:
+		return days[0].Date() + " → " + WindowEnd(days)
+	}
+}
+
 // Date is the report day as YYYY-MM-DD.
 func (r Range) Date() string { return r.Start.Format(Layout) }
 
@@ -70,8 +128,10 @@ func (r Range) Date() string { return r.Start.Format(Layout) }
 // on each side.
 func (r Range) EventsAfter() string { return r.Start.AddDate(0, 0, -1).Format(Layout) }
 
-// EventsBefore is GitLab's exclusive `before` value for /events.
-func (r Range) EventsBefore() string { return r.End.Format(Layout) }
+// EventsBefore is GitLab's exclusive `before` value for /events. It always
+// names the day after the range start: the API bounds are date-only, thus a
+// window that ends "now" must still ask for the whole day.
+func (r Range) EventsBefore() string { return r.Start.AddDate(0, 0, 1).Format(Layout) }
 
 // StartTimestamp is an RFC3339 timestamp with the report offset, used for
 // updated_after / since parameters.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,63 @@ func fixtureStub(t *testing.T) *testutil.GitLabStub {
 	})
 
 	return stub
+}
+
+// fixtureStubForDay is fixtureStub filtered to one day: only requests whose
+// window names day get activity, and every other day answers empty. A window
+// around day therefore has exactly one day with data.
+func fixtureStubForDay(t *testing.T, day string) *testutil.GitLabStub {
+	t.Helper()
+	stub := fixtureStub(t)
+	loc := testLocation(t)
+	start, err := time.ParseInLocation(date.Layout, day, loc)
+	if err != nil {
+		t.Fatalf("parse fixture day %q: %v", day, err)
+	}
+	// /events takes date-only exclusive bounds, so the day arrives as the
+	// day after `after`.
+	eventsAfter := start.AddDate(0, 0, -1).Format(date.Layout)
+
+	stub.Handle("/api/v4/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("after") != eventsAfter {
+			testutil.Body("[]")(w, r)
+			return
+		}
+		testutil.JSON(t, "events.json")(w, r)
+	})
+	stub.Handle("/api/v4/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if !strings.HasPrefix(query.Get("updated_after"), day) {
+			testutil.Body("[]")(w, r)
+			return
+		}
+		if query.Get("reviewer_username") != "" || query.Get("reviewer_id") != "" {
+			testutil.JSON(t, "review_merge_requests.json")(w, r)
+			return
+		}
+		testutil.JSON(t, "merge_requests.json")(w, r)
+	})
+	return stub
+}
+
+// testLocation is the report timezone the fixtures use.
+func testLocation(t *testing.T) *time.Location {
+	t.Helper()
+	loc, err := date.ParseTimezone("Asia/Tehran")
+	if err != nil {
+		t.Fatalf("load timezone: %v", err)
+	}
+	return loc
+}
+
+// testDayRange parses a fixture day into its report range.
+func testDayRange(t *testing.T, day string) date.Range {
+	t.Helper()
+	rng, err := date.ParseDay(day, testLocation(t))
+	if err != nil {
+		t.Fatalf("parse day %q: %v", day, err)
+	}
+	return rng
 }
 
 func collectFixture(t *testing.T, opts Options) *Report {

@@ -192,6 +192,25 @@ func (c *Collector) Collect(ctx context.Context, rng date.Range, user *gitlab.Us
 	return rep, nil
 }
 
+// CollectWindow gathers every day of the window, oldest first, and combines
+// the per-day reports into one multi-day report.
+func (c *Collector) CollectWindow(ctx context.Context, days []date.Range, user *gitlab.User, opts Options) (*MultiDay, error) {
+	if len(days) == 0 {
+		return nil, errors.New("report: the window has no days")
+	}
+
+	ranges := append([]date.Range(nil), days...)
+	reports := make([]*Report, 0, len(ranges))
+	for _, rng := range ranges {
+		rep, err := c.Collect(ctx, rng, user, opts)
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, rep)
+	}
+	return NewMultiDay(ranges, reports), nil
+}
+
 // integrateCommits deduplicates commit results by project + SHA and attaches
 // them to their projects. It returns how many commits the author filter
 // excluded.
