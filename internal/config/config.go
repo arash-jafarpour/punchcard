@@ -19,7 +19,7 @@ import (
 
 // Defaults used when the corresponding environment variable is empty.
 const (
-	DefaultGitLabURL       = "https://gitlab.daal.ir"
+	DefaultGitLabURL       = "https://gitlab.com"
 	DefaultReportDir       = "./reports"
 	DefaultTelegramAPIBase = "https://api.telegram.org"
 )

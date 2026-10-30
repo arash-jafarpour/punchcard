@@ -3,7 +3,7 @@
 Generates a deterministic English Markdown report of GitLab activity for one
 user — one day, or the last N days — and sends it to Telegram as a document.
 
-- Instance: `https://gitlab.daal.ir`
+- Instance: `https://gitlab.com` (self-hosted instances work via `GITLAB_URL`)
 - Report day: yesterday in `Asia/Tehran` by default; `--date` picks one day,
   `--days N` picks a window ending today
 - Data: commits/pushes, merge requests, reviews, issues and issue comments
@@ -70,7 +70,7 @@ expand `$VAR` and it does not run commands.
 
 | Variable | Required | Default | Purpose |
 |---|---:|---|---|
-| `GITLAB_URL` | no | `https://gitlab.daal.ir` | GitLab base URL |
+| `GITLAB_URL` | no | `https://gitlab.com` | GitLab base URL; set it for a self-hosted instance |
 | `GITLAB_TOKEN` | yes | — | personal access token (`read_api` + `read_user`) |
 | `GITLAB_USERNAME` | no | from `/user` | fallback username |
 | `GITLAB_AUTHOR_EMAILS` | no | empty | comma-separated commit-author filter |
