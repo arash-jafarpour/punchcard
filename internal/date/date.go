@@ -86,6 +86,35 @@ func LastDays(now time.Time, loc *time.Location, n int) []Range {
 	return days
 }
 
+// DaysBetween returns the consecutive day windows from the calendar day that
+// contains from through the calendar day that contains to, in loc. The caller
+// validates that from does not fall after to; a reversed span returns nil.
+// The windows are ordered oldest first and every window starts at local
+// midnight. When the last day is the day that contains now, it ends at now,
+// so a run never claims activity that has not happened yet.
+func DaysBetween(now, from, to time.Time, loc *time.Location) []Range {
+	first := NewRange(loc, from)
+	last := NewRange(loc, to)
+	if last.Start.Before(first.Start) {
+		return nil
+	}
+
+	days := []Range{first}
+	for days[len(days)-1].Start.Before(last.Start) {
+		prev := days[len(days)-1]
+		days = append(days, Range{
+			Location: loc,
+			Timezone: loc.String(),
+			Start:    prev.End,
+			End:      prev.End.AddDate(0, 0, 1),
+		})
+	}
+	if last.Date() == NewRange(loc, now).Date() {
+		days[len(days)-1].End = now.In(loc)
+	}
+	return days
+}
+
 // WindowEnd is the last, inclusive day of an ordered window as YYYY-MM-DD.
 func WindowEnd(days []Range) string {
 	if len(days) == 0 {

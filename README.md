@@ -1,11 +1,12 @@
 # punchcard
 
 Generates a deterministic English Markdown report of GitLab activity for one
-user — one day, or the last N days — and sends it to Telegram as a document.
+user — one day, the last N days, or any span of days — and sends it to
+Telegram as a document.
 
 - Instance: `https://gitlab.com` (self-hosted instances work via `GITLAB_URL`)
 - Report day: yesterday in `Asia/Tehran` by default; `--date` picks one day,
-  `--days N` picks a window ending today
+  `--days N` picks a window ending today, `--from`/`--to` picks any range
 - Data: commits/pushes, merge requests, reviews, issues and issue comments
 - Output: `reports/YYYY-MM-DD.md`, or `reports/YYYY-MM-DD_YYYY-MM-DD.md` for a
   window, mode `0600`
@@ -18,6 +19,8 @@ Working:
   applies the exit codes and logs to stderr via `slog`
 - `--days N`: one combined report for the last N days ending today, with one
   section per day that has activity and one aggregate summary
+- `--from`/`--to`: one combined report for any inclusive range of days, with
+  the same shape as the `--days` window
 - configuration, `Asia/Tehran` date math, GitLab client, collection,
   deduplication and the Markdown renderer
 - `punchcard update`: replaces the binary with the latest GitHub release
@@ -83,8 +86,9 @@ expand `$VAR` and it does not run commands.
 | `SEND_EMPTY_REPORT` | no | `true` | send a no-activity heartbeat |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error` |
 
-Flags: `-d/--date YYYY-MM-DD`, `--days N`, `--env-file PATH`, `--dry-run`,
-`--report-dir PATH`, `-v/--verbose`, `-V/--version`, `-h/--help`.
+Flags: `-d/--date YYYY-MM-DD`, `--days N`, `--from YYYY-MM-DD`,
+`--to YYYY-MM-DD`, `--env-file PATH`, `--dry-run`, `--report-dir PATH`,
+`-v/--verbose`, `-V/--version`, `-h/--help`.
 Keep the long forms in scripts and systemd units.
 
 Commands: `update` (see below), `completion SHELL`, `help`. A bare `punchcard`
@@ -99,10 +103,15 @@ A run reports exactly one window:
 | none | yesterday, whole day | `YYYY-MM-DD.md` |
 | `--date YYYY-MM-DD` | that day, whole day | `YYYY-MM-DD.md` |
 | `--days N` | the last N days ending today | `YYYY-MM-DD_YYYY-MM-DD.md` (`YYYY-MM-DD.md` for `N=1`) |
+| `--from YYYY-MM-DD --to YYYY-MM-DD` | that inclusive range | `YYYY-MM-DD_YYYY-MM-DD.md` (`YYYY-MM-DD.md` for a one-day range) |
 
-`--date` and `--days` cannot be combined, and a combination exits 1. `N` must
-be between 1 and 90; `--days 0`, `--days 91` and negative values exit 1 before
-any network call.
+The window flags are mutually exclusive: `--date`, `--days` and
+`--from/--to` cannot be combined, and a combination exits 1. `--from` and
+`--to` are required together. `N` must be between 1 and 90; `--days 0`,
+`--days 91` and negative values exit 1 before any network call. A
+`--from/--to` window obeys the same 90-day cap, may contain no future day
+(numbering `--to` after today exits 1 before any network call), and a one-day
+range is the ordinary daily report for that day.
 
 The window ends at the moment of the run, so the current day is partial: a
 07:00 run with `--days 2` reports all of yesterday and today up to 07:00. A
@@ -322,9 +331,11 @@ go test ./internal/report -run TestRenderGolden -update
   commit wins.
 - `Persistent=true` timers still default to "yesterday relative to now", so a
   laptop that was off for several days produces one report, not one per missed
-  day. Use `--days N` for a catch-up window; it is capped at 90 days.
-- A window costs one full collection per day, so a long `--days` run makes
-  proportionally more GitLab requests and can hit the instance's rate limit.
+  day. Use `--days N` or `--from`/`--to` for a catch-up window; it is capped at
+  90 days.
+- A window costs one full collection per day, so a long `--days` or
+  `--from/--to` run makes proportionally more GitLab requests and can hit the
+  instance's rate limit.
 - The window includes the current day up to the run time, thus a timer that
   runs early in the day reports a mostly empty today.
 - Delivery has no persistence or deduplication. A retry after a timeout can

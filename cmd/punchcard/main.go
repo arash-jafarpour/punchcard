@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -44,6 +45,8 @@ var errRunFailed = errors.New("run failed")
 type options struct {
 	date      string
 	days      int
+	from      string
+	to        string
 	envFile   string
 	dryRun    bool
 	reportDir string
@@ -104,8 +107,8 @@ func newRootCommand(started *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "punchcard",
 		Short: "Generate the GitLab daily report",
-		Long: "Generate a Markdown report of one user's GitLab activity for one day\n" +
-			"or for a window of recent days.\n" +
+		Long: "Generate a Markdown report of one user's GitLab activity for one day,\n" +
+			"for a window of recent days, or for any span of days.\n" +
 			"The Markdown file is sent to TELEGRAM_CHAT_ID as a document with a short\n" +
 			"caption unless --dry-run is set.\n\n" +
 			"Precedence: flags, then the process environment, then the env file.\n" +
@@ -113,6 +116,7 @@ func newRootCommand(started *bool) *cobra.Command {
 			"$XDG_CONFIG_HOME/punchcard/env.",
 		Example: "  punchcard --date 2026-10-27 --dry-run\n" +
 			"  punchcard --days 7 --dry-run\n" +
+			"  punchcard --from 2026-10-01 --to 2026-10-31 --dry-run\n" +
 			"  punchcard --env-file ./env --verbose",
 		Version:       versionString(),
 		Args:          cobra.NoArgs,
@@ -134,6 +138,8 @@ func newRootCommand(started *bool) *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVarP(&opts.date, "date", "d", "", "report date as YYYY-MM-DD (default: yesterday in the report timezone)")
 	flags.IntVar(&opts.days, "days", 0, "report the last N days ending today (1-90); cannot be combined with --date")
+	flags.StringVar(&opts.from, "from", "", "report window start as YYYY-MM-DD (inclusive); requires --to")
+	flags.StringVar(&opts.to, "to", "", "report window end as YYYY-MM-DD (inclusive, at most today); requires --from")
 	flags.StringVar(&opts.envFile, "env-file", "", "read KEY=VALUE lines from this file (default: $XDG_CONFIG_HOME/punchcard/env)")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "write the Markdown file but do not contact Telegram")
 	flags.StringVar(&opts.reportDir, "report-dir", "", "output directory (default: ./reports or REPORT_DIR)")
@@ -186,12 +192,17 @@ func prepare(cmd *cobra.Command, opts options) error {
 }
 
 // resolveDays turns the flags into the ordered day window of the run. A bare
-// run reports yesterday, --date reports one named day, and --days reports the
-// last N days ending today. The window is the single definition that the
-// collector, the file name and the caption share.
+// run reports yesterday, --date reports one named day, --days reports the
+// last N days ending today, and --from/--to reports any span of days. The
+// window is the single definition that the collector, the file name and the
+// caption share.
 func resolveDays(cmd *cobra.Command, opts options, loc *time.Location) ([]date.Range, error) {
 	daysSet := cmd.Flags().Changed("days")
+	fromSet := cmd.Flags().Changed("from")
+	toSet := cmd.Flags().Changed("to")
 	switch {
+	case (opts.date != "" || daysSet) && (fromSet || toSet):
+		return nil, errors.New("--date and --days cannot be combined with --from/--to")
 	case opts.date != "" && daysSet:
 		return nil, errors.New("--date and --days cannot be combined")
 	case daysSet && (opts.days < minDays || opts.days > maxDays):
@@ -199,15 +210,51 @@ func resolveDays(cmd *cobra.Command, opts options, loc *time.Location) ([]date.R
 			minDays, maxDays, opts.days)
 	case daysSet:
 		return date.LastDays(time.Now(), loc, opts.days), nil
+	case fromSet != toSet:
+		return nil, errors.New("--from and --to must be used together")
 	case opts.date != "":
 		rng, err := date.ParseDay(opts.date, loc)
 		if err != nil {
 			return nil, err
 		}
 		return []date.Range{rng}, nil
+	case fromSet:
+		return parseWindow(opts.from, opts.to, loc)
 	default:
 		return []date.Range{date.Yesterday(time.Now(), loc)}, nil
 	}
+}
+
+// parseWindow turns --from/--to values into the ordered day window. The range
+// is inclusive on both ends, may not reach into the future, and shares the
+// 90-day cap of --days so one run's API usage, report size and upload stay
+// predictable.
+func parseWindow(from, to string, loc *time.Location) ([]date.Range, error) {
+	first, err := date.ParseDay(from, loc)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --from: %w", err)
+	}
+	last, err := date.ParseDay(to, loc)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --to: %w", err)
+	}
+
+	now := time.Now()
+	today := date.NewRange(loc, now)
+	switch {
+	case last.Start.After(today.Start):
+		return nil, fmt.Errorf("--to %s is after today (%s)", to, today.Date())
+	case first.Start.After(last.Start):
+		return nil, fmt.Errorf("--from %s is after --to %s", from, to)
+	}
+
+	// Both bounds are local midnights, so the duration is a whole number of
+	// days plus at most one DST hour; rounding makes the count exact.
+	span := int(math.Round(last.Start.Sub(first.Start).Hours()/24)) + 1
+	if span > maxDays {
+		return nil, fmt.Errorf("report window must span at most %d days, got %d", maxDays, span)
+	}
+	return date.DaysBetween(now, first.Start, last.Start, loc), nil
 }
 
 // generated is the artifact of one run: the file on disk plus the numbers the

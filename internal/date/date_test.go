@@ -1,6 +1,7 @@
 package date
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -243,6 +244,122 @@ func TestLastDaysRejectsNonPositiveCount(t *testing.T) {
 			t.Errorf("LastDays(n=%d) = %v, want nil", n, days)
 		}
 	}
+}
+
+func TestDaysBetween(t *testing.T) {
+	loc := tehran(t)
+	tests := []struct {
+		name    string
+		now     string
+		from    string
+		to      string
+		want    []string
+		wantEnd string // end of the last window, as a timestamp
+	}{
+		{
+			name:    "single past day spans exactly its own midnight",
+			now:     "2026-11-02T09:00:00+03:30",
+			from:    "2026-10-05",
+			to:      "2026-10-05",
+			want:    []string{"2026-10-05"},
+			wantEnd: "2026-10-06T00:00:00+03:30",
+		},
+		{
+			name:    "four days",
+			now:     "2026-11-02T09:00:00+03:30",
+			from:    "2026-10-05",
+			to:      "2026-10-08",
+			want:    []string{"2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"},
+			wantEnd: "2026-10-09T00:00:00+03:30",
+		},
+		{
+			name:    "across a month boundary",
+			now:     "2026-11-02T09:00:00+03:30",
+			from:    "2026-10-30",
+			to:      "2026-11-01",
+			want:    []string{"2026-10-30", "2026-10-31", "2026-11-01"},
+			wantEnd: "2026-11-02T00:00:00+03:30",
+		},
+		{
+			name:    "window ending today ends at now",
+			now:     "2026-11-02T09:00:00+03:30",
+			from:    "2026-10-31",
+			to:      "2026-11-02",
+			want:    []string{"2026-10-31", "2026-11-01", "2026-11-02"},
+			wantEnd: "2026-11-02T09:00:00+03:30",
+		},
+		{
+			name:    "single today ends at now",
+			now:     "2026-11-02T09:00:00+03:30",
+			from:    "2026-11-02",
+			to:      "2026-11-02",
+			want:    []string{"2026-11-02"},
+			wantEnd: "2026-11-02T09:00:00+03:30",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := mustParse(t, test.now)
+			from, err := time.ParseInLocation(Layout, test.from, loc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			to, err := time.ParseInLocation(Layout, test.to, loc)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			days := DaysBetween(now, from, to, loc)
+			if len(days) != len(test.want) {
+				t.Fatalf("days = %d (%v), want %d", len(days), dates(days), len(test.want))
+			}
+			for i, rng := range days {
+				if got := rng.Date(); got != test.want[i] {
+					t.Errorf("day[%d] = %s, want %s", i, got, test.want[i])
+				}
+				if rng.Start.Hour() != 0 || rng.Start.Minute() != 0 || rng.Start.Second() != 0 {
+					t.Errorf("day[%d] does not start at midnight: %s", i, rng.Start)
+				}
+				if rng.Location != loc || rng.Timezone != DefaultTimezone {
+					t.Errorf("day[%d] location = %v/%s", i, rng.Location, rng.Timezone)
+				}
+			}
+			for i := 0; i < len(days)-1; i++ {
+				if !days[i].End.Equal(days[i+1].Start) {
+					t.Errorf("day[%d] ends at %s, next starts at %s",
+						i, days[i].End, days[i+1].Start)
+				}
+			}
+			last := days[len(days)-1]
+			if got := last.End.Format(time.RFC3339); got != test.wantEnd {
+				t.Errorf("last end = %s, want %s", got, test.wantEnd)
+			}
+			if got := WindowStem(days); got != test.want[0]+"_"+test.want[len(test.want)-1] && len(test.want) > 1 {
+				t.Errorf("stem = %q, want %q", got, test.want[0]+"_"+test.want[len(test.want)-1])
+			}
+		})
+	}
+}
+
+func TestDaysBetweenRejectsReversedSpan(t *testing.T) {
+	loc := tehran(t)
+	now := mustParse(t, "2026-11-02T09:00:00+03:30")
+	from, _ := time.ParseInLocation(Layout, "2026-10-08", loc)
+	to, _ := time.ParseInLocation(Layout, "2026-10-05", loc)
+
+	if days := DaysBetween(now, from, to, loc); days != nil {
+		t.Errorf("DaysBetween(from after to) = %v, want nil", dates(days))
+	}
+}
+
+// dates renders a window for failure messages.
+func dates(days []Range) string {
+	parts := make([]string, len(days))
+	for i, rng := range days {
+		parts[i] = rng.Date()
+	}
+	return strings.Join(parts, ", ")
 }
 
 func TestWindowHelpers(t *testing.T) {

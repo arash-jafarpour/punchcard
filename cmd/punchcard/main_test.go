@@ -466,6 +466,144 @@ func TestDaysFlagValidation(t *testing.T) {
 	}
 }
 
+func TestFromToFlagWritesRangeReport(t *testing.T) {
+	stub := newEmptyStub(t)
+	dir := t.TempDir()
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	code, _, stderr := execute(t, "--from", "2026-10-05", "--to", "2026-10-08",
+		"--dry-run", "--report-dir", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "days=4") {
+		t.Errorf("log lacks the window size: %q", stderr)
+	}
+	for _, field := range []string{
+		"date=2026-10-05_2026-10-08",
+		`window="` + "2026-10-05 → 2026-10-08" + `"`,
+	} {
+		if !strings.Contains(stderr, field) {
+			t.Errorf("log lacks %q: %q", field, stderr)
+		}
+	}
+
+	path, start, end := rangeFile(t, dir)
+	if start != "2026-10-05" || end != "2026-10-08" {
+		t.Errorf("file %q covers %s → %s, want 2026-10-05 → 2026-10-08",
+			filepath.Base(path), start, end)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	wantTitle := "# Activity report — 2026-10-05 → 2026-10-08\n"
+	if !strings.HasPrefix(string(data), wantTitle) {
+		t.Errorf("report title = %q, want %q",
+			strings.SplitN(string(data), "\n", 2)[0], wantTitle)
+	}
+}
+
+func TestFromToSingleDayKeepsDailyReport(t *testing.T) {
+	stub := newEmptyStub(t)
+	dir := t.TempDir()
+	baseEnv(t, map[string]string{"GITLAB_URL": stub.URL()})
+
+	code, _, stderr := execute(t, "--from", "2026-10-05", "--to", "2026-10-05",
+		"--dry-run", "--report-dir", dir)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr %q)", code, stderr)
+	}
+
+	path, start, end := rangeFile(t, dir)
+	if start != "2026-10-05" || end != "2026-10-05" {
+		t.Fatalf("file %q covers %s → %s, want one day", filepath.Base(path), start, end)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	if want := "# Daily report — 2026-10-05\n"; !strings.HasPrefix(string(data), want) {
+		t.Errorf("report does not start with %q:\n%s", want, data)
+	}
+	if !strings.Contains(stderr, `msg="report generated"`) {
+		t.Errorf("stderr lacks the report-generated log: %q", stderr)
+	}
+}
+
+func TestFromToValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "from without to",
+			args: []string{"--from", "2026-10-05"},
+			want: "--from and --to must be used together",
+		},
+		{
+			name: "to without from",
+			args: []string{"--to", "2026-10-08"},
+			want: "--from and --to must be used together",
+		},
+		{
+			name: "from and to with date",
+			args: []string{"--date", "2026-10-27", "--from", "2026-10-05", "--to", "2026-10-08"},
+			want: "--date and --days cannot be combined with --from/--to",
+		},
+		{
+			name: "from and to with days",
+			args: []string{"--days", "2", "--from", "2026-10-05", "--to", "2026-10-08"},
+			want: "--date and --days cannot be combined with --from/--to",
+		},
+		{
+			name: "from after to",
+			args: []string{"--from", "2026-10-10", "--to", "2026-10-05"},
+			want: "--from 2026-10-10 is after --to 2026-10-05",
+		},
+		{
+			name: "to in the future",
+			args: []string{"--from", "2026-10-01", "--to", "2999-12-31"},
+			want: "--to 2999-12-31 is after today",
+		},
+		{
+			name: "window too long",
+			args: []string{"--from", "2026-01-01", "--to", "2026-04-30"},
+			want: "report window must span at most 90 days, got 120",
+		},
+		{
+			name: "invalid from",
+			args: []string{"--from", "2026/01/01", "--to", "2026-01-31"},
+			want: "invalid --from",
+		},
+		{
+			name: "invalid to",
+			args: []string{"--from", "2026-01-01", "--to", "2026-02-30"},
+			want: "invalid --to",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseEnv(t, nil)
+			args := append(append([]string(nil), tt.args...), "--dry-run")
+			code, _, stderr := execute(t, args...)
+			if code != 1 {
+				t.Errorf("exit code = %d, want 1 (stderr %q)", code, stderr)
+			}
+			if !strings.Contains(stderr, tt.want) {
+				t.Errorf("stderr = %q, want %q", stderr, tt.want)
+			}
+			if strings.Contains(stderr, "Usage:") {
+				t.Errorf("a validation failure printed the usage text: %q", stderr)
+			}
+		})
+	}
+}
+
 func TestWindowCaption(t *testing.T) {
 	loc, err := date.ParseTimezone(date.DefaultTimezone)
 	if err != nil {
