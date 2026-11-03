@@ -33,7 +33,7 @@ func TestCollectFixtureDay(t *testing.T) {
 		Deletions:  45,
 		MRsMerged:  1,
 		MRsUpdated: 1,
-		Issues:     2,
+		Issues:     3,
 		Reviews:    3,
 	}
 	if rep.Summary != wantSummary {
@@ -95,8 +95,8 @@ func TestCollectFixtureDay(t *testing.T) {
 		t.Errorf("review = %+v", review)
 	}
 
-	if len(loginPanel.Issues) != 2 {
-		t.Fatalf("login-panel issues = %d, want 2", len(loginPanel.Issues))
+	if len(loginPanel.Issues) != 3 {
+		t.Fatalf("login-panel issues = %d, want 3", len(loginPanel.Issues))
 	}
 	if loginPanel.Issues[0].IID != 17 || loginPanel.Issues[0].Action != "closed" {
 		t.Errorf("issue[0] = %+v", loginPanel.Issues[0])
@@ -107,6 +107,13 @@ func TestCollectFixtureDay(t *testing.T) {
 	}
 	if comment.Note != "Added the filter to the endpoint. Next: tests." {
 		t.Errorf("issue comment = %q", comment.Note)
+	}
+	workItem := loginPanel.Issues[2]
+	if workItem.IID != 19 || workItem.Action != "closed" {
+		t.Errorf("work item issue = %+v", workItem)
+	}
+	if want := "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/work_items/19"; workItem.WebURL != want {
+		t.Errorf("work item URL = %q, want %q", workItem.WebURL, want)
 	}
 
 	dUI := projectByPath(t, rep, "delijan/web/d-ui")
@@ -271,7 +278,7 @@ func TestCollectWindow(t *testing.T) {
 		Deletions:  45,
 		MRsMerged:  1,
 		MRsUpdated: 1,
-		Issues:     2,
+		Issues:     3,
 		Reviews:    3,
 	}
 	if md.Summary != wantSummary {
@@ -364,6 +371,126 @@ func TestMRHeadlineActionPrecedence(t *testing.T) {
 	updated := gitlab.MergeRequest{CreatedAt: earlier}
 	if got := mrAction(updated, rng); got != ActionUpdated {
 		t.Errorf("updated action = %s, want updated", got)
+	}
+}
+
+func TestCollectMergeRequestEvent(t *testing.T) {
+	stub := testutil.NewGitLabStub(t)
+	stub.Handle("/api/v4/events", testutil.Body(`[
+		{"id": 1, "project_id": 42, "author_username": "arash.jafarpour",
+		 "action_name": "merged", "target_type": "MergeRequest",
+		 "target_iid": 50, "target_title": "A colleague's MR",
+		 "created_at": "2026-10-27T16:30:00+03:30"}
+	]`))
+	stub.Handle("/api/v4/merge_requests", testutil.Body("[]"))
+	stub.JSON("/api/v4/projects/42", "project.json")
+	stub.Handle("/api/v4/projects/42/merge_requests/50/notes", testutil.Body("[]"))
+
+	client := stub.Client(testToken)
+	rng := testDayRange(t, testDay)
+	rep, err := NewCollector(client, nil).Collect(context.Background(), rng,
+		&gitlab.User{ID: 7, Username: "arash.jafarpour"}, Options{})
+	if err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+
+	if rep.Summary.MRsMerged != 1 {
+		t.Errorf("MRsMerged = %d, want 1", rep.Summary.MRsMerged)
+	}
+	project := projectByPath(t, rep, "delijan/web/delijan-login-panel")
+	if len(project.MergeRequests) != 1 {
+		t.Fatalf("MRs = %d, want 1", len(project.MergeRequests))
+	}
+	mr := project.MergeRequests[0]
+	if mr.IID != 50 || mr.Action != ActionMerged {
+		t.Errorf("MR = %+v", mr)
+	}
+	if want := "https://gitlab.daal.ir/delijan/web/delijan-login-panel/-/merge_requests/50"; mr.WebURL != want {
+		t.Errorf("MR URL = %q, want %q", mr.WebURL, want)
+	}
+	if len(project.Reviews) != 0 {
+		t.Errorf("an event-only MR leaked into reviews: %+v", project.Reviews)
+	}
+}
+
+func TestMREventAction(t *testing.T) {
+	tests := []struct {
+		name string
+		want Action
+		ok   bool
+	}{
+		{"opened", ActionOpened, true},
+		{"created", ActionOpened, true},
+		{"merged", ActionMerged, true},
+		{"closed", ActionClosed, true},
+		{"updated", ActionUpdated, true},
+		{"reopened", ActionUpdated, true},
+		{"approved", "", false},
+		{"", "", false},
+	}
+	for _, test := range tests {
+		got, ok := mrEventAction(test.name)
+		if got != test.want || ok != test.ok {
+			t.Errorf("mrEventAction(%q) = %q, %v; want %q, %v",
+				test.name, got, ok, test.want, test.ok)
+		}
+	}
+}
+
+func TestMRAccumEventKeepsLatestAction(t *testing.T) {
+	acc := &mrAccum{roles: map[mrRole]struct{}{roleActor: {}}}
+	earlier := mustTime(t, "2026-10-27T10:00:00+03:30")
+	later := mustTime(t, "2026-10-27T11:00:00+03:30")
+
+	acc.noteEvent(ActionOpened, earlier)
+	acc.noteEvent(ActionMerged, later)
+	if got := acc.action(testDayRange(t, testDay)); got != ActionMerged {
+		t.Errorf("action = %s, want merged", got)
+	}
+
+	// An older event never overrides a newer one, whatever the feed order.
+	acc.noteEvent(ActionClosed, earlier)
+	if got := acc.action(testDayRange(t, testDay)); got != ActionMerged {
+		t.Errorf("older event changed the action to %s", got)
+	}
+}
+
+func TestIssueAction(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"opened", "opened"},
+		{"created", "opened"},
+		{"closed", "closed"},
+		{"reopened", "reopened"},
+		{"labeled", "updated"},
+		{"", "updated"},
+	}
+	for _, test := range tests {
+		if got := issueAction(test.name); got != test.want {
+			t.Errorf("issueAction(%q) = %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+func TestIssueWebPath(t *testing.T) {
+	tests := []struct {
+		targetType string
+		iid        int
+		want       string
+	}{
+		{"Issue", 17, "/-/issues/17"},
+		{"issue", 17, "/-/issues/17"},
+		{"WorkItem", 19, "/-/work_items/19"},
+		{"workitem", 19, "/-/work_items/19"},
+		{"", 3, "/-/issues/3"},
+	}
+	for _, test := range tests {
+		if got := issueWebPath(test.targetType, test.iid); got != test.want {
+			t.Errorf("issueWebPath(%q, %d) = %q, want %q",
+				test.targetType, test.iid, got, test.want)
+		}
 	}
 }
 

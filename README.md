@@ -7,7 +7,8 @@ Telegram as a document.
 - Instance: `https://gitlab.com` (self-hosted instances work via `GITLAB_URL`)
 - Report day: yesterday in `Asia/Tehran` by default; `--date` picks one day,
   `--days N` picks a window ending today, `--from`/`--to` picks any range
-- Data: commits/pushes, merge requests, reviews, issues and issue comments
+- Data: commits/pushes, merge requests (authored, reviewed, or acted on),
+  reviews, issues and issue comments
 - Output: `reports/YYYY-MM-DD.md`, or `reports/YYYY-MM-DD_YYYY-MM-DD.md` for a
   window, mode `0600`
 
@@ -313,6 +314,10 @@ go test ./internal/report -run TestRenderGolden -update
 
 ## Known limitations
 
+- GitLab 18.10+ reports issues as work items, so close and reopen events
+  arrive with `target_type: "WorkItem"` instead of `"Issue"`. The collector
+  accepts both, but the event payload does not say whether the work item is an
+  issue or a task; a closed task is therefore rendered as an issue update.
 - `/events` is queried without `scope=all`. On this instance `scope=all`
   selects a capped recent-activity feed (20 newest events), which silently
   truncates older parts of a day once newer events arrive; the default feed is

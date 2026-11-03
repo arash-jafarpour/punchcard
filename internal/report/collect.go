@@ -121,16 +121,41 @@ func (c *Collector) Collect(ctx context.Context, rng date.Range, user *gitlab.Us
 			}
 			works = append(works, work)
 
-		case ev.TargetType == "Issue":
-			if ev.ProjectID <= 0 {
+		// GitLab 18.10+ reports issues as work items: close and reopen
+		// events arrive with target_type "WorkItem" instead of "Issue".
+		// Accept both so the report does not silently lose them.
+		case ev.TargetType == "Issue" || ev.TargetType == "WorkItem":
+			if ev.ProjectID <= 0 || ev.TargetIID <= 0 {
 				continue
 			}
 			pa := agg.project(ev.ProjectID)
 			pa.issues = append(pa.issues, issueSeed{
-				iid:    ev.TargetIID,
-				title:  ev.TargetTitle,
-				action: issueAction(ev.ActionName),
-				at:     ev.CreatedAt,
+				iid:     ev.TargetIID,
+				title:   ev.TargetTitle,
+				action:  issueAction(ev.ActionName),
+				at:      ev.CreatedAt,
+				webPath: issueWebPath(ev.TargetType, ev.TargetIID),
+			})
+
+		case ev.TargetType == "MergeRequest":
+			if ev.ProjectID <= 0 || ev.TargetIID <= 0 {
+				continue
+			}
+			action, ok := mrEventAction(ev.ActionName)
+			if !ok {
+				c.log.Debug("ignoring merge request event",
+					"id", ev.ID,
+					"action", ev.ActionName,
+					"project_id", ev.ProjectID,
+				)
+				continue
+			}
+			agg.mrEvents = append(agg.mrEvents, mrEvent{
+				projectID: ev.ProjectID,
+				iid:       ev.TargetIID,
+				title:     ev.TargetTitle,
+				action:    action,
+				at:        ev.CreatedAt,
 			})
 
 		case ev.TargetType == "Note" && ev.Note != nil:
@@ -141,18 +166,32 @@ func (c *Collector) Collect(ctx context.Context, rng date.Range, user *gitlab.Us
 			if iid == 0 {
 				iid = ev.TargetIID
 			}
+			if iid <= 0 {
+				continue
+			}
 			at := ev.Note.CreatedAt
 			if at.IsZero() {
 				at = ev.CreatedAt
 			}
 			pa := agg.project(ev.ProjectID)
 			pa.issues = append(pa.issues, issueSeed{
-				iid:    iid,
-				title:  ev.TargetTitle,
-				action: "commented",
-				note:   clip(collapseWhitespace(ev.Note.Body), reviewExcerptLimit),
-				at:     at,
+				iid:     iid,
+				title:   ev.TargetTitle,
+				action:  "commented",
+				note:    clip(collapseWhitespace(ev.Note.Body), reviewExcerptLimit),
+				at:      at,
+				webPath: issueWebPath(ev.Note.NoteableType, iid),
 			})
+
+		default:
+			// Surface event shapes we do not handle (GitLab changes
+			// target_type between versions) without failing the report.
+			c.log.Debug("ignoring event",
+				"id", ev.ID,
+				"action", ev.ActionName,
+				"target_type", ev.TargetType,
+				"project_id", ev.ProjectID,
+			)
 		}
 	}
 
@@ -272,6 +311,24 @@ func (c *Collector) collectMergeRequests(ctx context.Context, rng date.Range, us
 		agg.addMR(mr, roleReviewer)
 	}
 
+	// Merge request events cover MRs the user acted on but neither authored
+	// nor reviewed (for example, merging a colleague's MR). The MR endpoints
+	// above carry richer data, so they win whenever both know the same MR.
+	for _, ev := range agg.mrEvents {
+		key := mrKey{projectID: ev.projectID, iid: ev.iid}
+		acc, exists := agg.mrs[key]
+		if !exists {
+			acc = agg.addMR(gitlab.MergeRequest{
+				ProjectID: ev.projectID,
+				IID:       ev.iid,
+				Title:     ev.title,
+			}, roleActor)
+		} else if acc.hasRole(roleAuthor) || acc.hasRole(roleReviewer) {
+			continue
+		}
+		acc.noteEvent(ev.action, ev.at)
+	}
+
 	keys := agg.mrKeys()
 	processed := 0
 	for _, key := range keys {
@@ -345,12 +402,16 @@ func (c *Collector) buildProjects(ctx context.Context, rng date.Range, agg *aggr
 		}
 
 		for _, acc := range sortedMRs(pa.mrs) {
-			if acc.hasRole(roleAuthor) {
+			webURL := acc.mr.WebURL
+			if webURL == "" && project.WebURL != "" {
+				webURL = fmt.Sprintf("%s/-/merge_requests/%d", project.WebURL, acc.mr.IID)
+			}
+			if acc.hasRole(roleAuthor) || acc.hasRole(roleActor) {
 				project.MergeRequests = append(project.MergeRequests, MergeRequest{
 					IID:          acc.mr.IID,
 					Title:        acc.mr.Title,
-					WebURL:       acc.mr.WebURL,
-					Action:       mrAction(acc.mr, rng),
+					WebURL:       webURL,
+					Action:       acc.action(rng),
 					CommentCount: acc.commentCount,
 				})
 				continue
@@ -358,7 +419,7 @@ func (c *Collector) buildProjects(ctx context.Context, rng date.Range, agg *aggr
 			project.Reviews = append(project.Reviews, Review{
 				IID:          acc.mr.IID,
 				Title:        acc.mr.Title,
-				WebURL:       acc.mr.WebURL,
+				WebURL:       webURL,
 				CommentCount: acc.commentCount,
 				Excerpts:     acc.excerpts,
 			})
@@ -373,7 +434,11 @@ func (c *Collector) buildProjects(ctx context.Context, rng date.Range, agg *aggr
 		for _, seed := range pa.issues {
 			url := ""
 			if project.WebURL != "" {
-				url = fmt.Sprintf("%s/-/issues/%d", project.WebURL, seed.iid)
+				path := seed.webPath
+				if path == "" {
+					path = fmt.Sprintf("/-/issues/%d", seed.iid)
+				}
+				url = project.WebURL + path
 			}
 			project.Issues = append(project.Issues, Issue{
 				IID:    seed.iid,
@@ -408,7 +473,7 @@ func summarize(agg *aggregate, projects []Project, rng date.Range) Summary {
 		}
 	}
 	for _, key := range agg.mrKeys() {
-		switch mrAction(agg.mrs[key].mr, rng) {
+		switch agg.mrs[key].action(rng) {
 		case ActionOpened:
 			summary.MRsOpened++
 		case ActionMerged:
@@ -658,6 +723,7 @@ type mrRole string
 const (
 	roleAuthor   mrRole = "author"
 	roleReviewer mrRole = "reviewer"
+	roleActor    mrRole = "actor"
 )
 
 type commitAccum struct {
@@ -710,6 +776,11 @@ type mrAccum struct {
 	roles        map[mrRole]struct{}
 	commentCount int
 	excerpts     []string
+	// eventAction is the headline action reported by an /events entry. It is
+	// only used for MRs the user acted on without authoring or reviewing
+	// them, where the MR endpoints have no per-day timestamps.
+	eventAction Action
+	eventAt     time.Time
 }
 
 func (m *mrAccum) hasRole(role mrRole) bool {
@@ -717,12 +788,38 @@ func (m *mrAccum) hasRole(role mrRole) bool {
 	return ok
 }
 
+// noteEvent keeps the latest action an event reported for the MR.
+func (m *mrAccum) noteEvent(action Action, at time.Time) {
+	if m.eventAction == "" || !at.Before(m.eventAt) {
+		m.eventAction = action
+		m.eventAt = at
+	}
+}
+
+// action is the headline action of the MR on the report day.
+func (m *mrAccum) action(rng date.Range) Action {
+	if m.eventAction != "" {
+		return m.eventAction
+	}
+	return mrAction(m.mr, rng)
+}
+
+// mrEvent is one MergeRequest entry of GET /events.
+type mrEvent struct {
+	projectID int
+	iid       int
+	title     string
+	action    Action
+	at        time.Time
+}
+
 type issueSeed struct {
-	iid    int
-	title  string
-	action string
-	note   string
-	at     time.Time
+	iid     int
+	title   string
+	action  string
+	note    string
+	at      time.Time
+	webPath string
 }
 
 type projectAgg struct {
@@ -744,6 +841,7 @@ type aggregate struct {
 	projects      map[int]*projectAgg
 	commits       map[commitKey]*commitAccum
 	mrs           map[mrKey]*mrAccum
+	mrEvents      []mrEvent
 	totalComments int
 }
 
@@ -877,11 +975,25 @@ func firstLine(message string) string {
 
 func issueAction(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "opened", "closed", "reopened":
-		return strings.ToLower(strings.TrimSpace(name))
+	case "opened", "created":
+		return "opened"
+	case "closed":
+		return "closed"
+	case "reopened":
+		return "reopened"
 	default:
 		return "updated"
 	}
+}
+
+// issueWebPath names the issue page for an event target. GitLab 18.10+
+// reports issues as work items and serves them under /-/work_items; older
+// instances report Issue events and use /-/issues.
+func issueWebPath(targetType string, iid int) string {
+	if strings.EqualFold(strings.TrimSpace(targetType), "WorkItem") {
+		return fmt.Sprintf("/-/work_items/%d", iid)
+	}
+	return fmt.Sprintf("/-/issues/%d", iid)
 }
 
 func mrAction(mr gitlab.MergeRequest, rng date.Range) Action {
@@ -894,5 +1006,23 @@ func mrAction(mr gitlab.MergeRequest, rng date.Range) Action {
 		return ActionOpened
 	default:
 		return ActionUpdated
+	}
+}
+
+// mrEventAction maps an /events action_name to the report headline action.
+// Approval events are ignored: the report does not enrich approvals, and
+// labelling them "updated" would overstate what happened.
+func mrEventAction(name string) (Action, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "opened", "created":
+		return ActionOpened, true
+	case "merged":
+		return ActionMerged, true
+	case "closed":
+		return ActionClosed, true
+	case "updated", "reopened":
+		return ActionUpdated, true
+	default:
+		return "", false
 	}
 }

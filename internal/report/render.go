@@ -310,7 +310,7 @@ func writeReviews(b *bytes.Buffer, reviews []Review, level int) {
 func writeIssues(b *bytes.Buffer, rep *Report, issues []Issue, level int) {
 	writeHeading(b, level, "Issues")
 	for _, issue := range issues {
-		ref := itemRef(issue.IID, issue.WebURL)
+		ref := issueRef(issue.IID, issue.WebURL)
 		title := cleanInline(issue.Title, 120)
 		if issue.Action == "commented" {
 			line := fmt.Sprintf("- `%s` %s", clock(rep, issue.At), ref)
@@ -338,6 +338,14 @@ func itemRef(iid int, webURL string) string {
 		return fmt.Sprintf("!%d", iid)
 	}
 	return fmt.Sprintf("[!%d](%s)", iid, webURL)
+}
+
+// issueRef is itemRef for issues: GitLab names merge requests !N and issues #N.
+func issueRef(iid int, webURL string) string {
+	if webURL == "" {
+		return fmt.Sprintf("#%d", iid)
+	}
+	return fmt.Sprintf("[#%d](%s)", iid, webURL)
 }
 
 func clock(rep *Report, t time.Time) string {
